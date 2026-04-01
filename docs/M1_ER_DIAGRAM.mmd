@@ -1,0 +1,65 @@
+erDiagram
+    users ||--o{ conversations : owns
+    users ||--o{ itineraries : owns
+    users ||--|| user_preferences : has
+    conversations ||--o{ messages : contains
+    conversations ||--o{ itineraries : generates
+
+    users {
+        string id PK
+        string email UK
+        string username UK
+        string password_hash
+        boolean is_active
+        datetime created_at
+        datetime updated_at
+        datetime last_login_at
+    }
+
+    user_preferences {
+        string id PK
+        string user_id FK
+        string language
+        string timezone
+        string budget_level
+        json interests_json
+        json dietary_json
+        string mobility_notes
+        datetime updated_at
+    }
+
+    conversations {
+        string id PK
+        string user_id FK
+        string title
+        boolean is_archived
+        datetime created_at
+        datetime updated_at
+    }
+
+    messages {
+        string id PK
+        string conversation_id FK
+        string user_id FK
+        string role
+        text content
+        integer token_count
+        json meta_json
+        datetime created_at
+    }
+
+    itineraries {
+        string id PK
+        string user_id FK
+        string conversation_id FK
+        string title
+        string destination
+        date start_date
+        date end_date
+        decimal total_budget
+        string currency
+        text summary
+        json raw_plan_json
+        datetime created_at
+        datetime updated_at
+    }

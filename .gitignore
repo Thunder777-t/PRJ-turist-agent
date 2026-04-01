@@ -14,6 +14,8 @@ venv/
 # Logs and local outputs
 logs/
 *.log
+*.db
+*.sqlite3
 
 # IDE files
 .idea/
