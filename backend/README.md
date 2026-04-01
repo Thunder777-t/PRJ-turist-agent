@@ -1,8 +1,34 @@
-# Backend Skeleton (M1)
+# Backend (M2)
 
-This folder contains M1 backend baseline artifacts for the final web app:
-- config and database setup
-- SQLAlchemy models
-- Pydantic API schemas
+This folder now includes M2 backend implementation:
+- FastAPI app scaffold
+- Auth endpoints (register/login/refresh/logout)
+- SQLite persistence with SQLAlchemy models
+- Alembic migration setup and first revision
+- User-isolated conversation endpoints
 
-No runtime API endpoints are implemented in M1 yet.
+## Quick start
+
+1. Install backend dependencies:
+```powershell
+.\.venv\Scripts\python -m pip install -r backend\requirements.txt
+```
+
+2. Apply migrations:
+```powershell
+.\.venv\Scripts\alembic upgrade head
+```
+
+3. Run API server:
+```powershell
+.\.venv\Scripts\uvicorn backend.app.main:app --reload
+```
+
+4. Open docs:
+- `http://127.0.0.1:8000/docs`
+
+## Test
+
+```powershell
+.\.venv\Scripts\python -m unittest discover -s backend\tests -v
+```

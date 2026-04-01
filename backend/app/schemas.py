@@ -26,6 +26,10 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
 class UserResponse(BaseModel):
     user_id: str
     email: EmailStr
@@ -56,6 +60,17 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     created_at: datetime
+
+
+class ChatRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=8000)
+    client_message_id: str | None = None
+
+
+class ChatResponse(BaseModel):
+    user_message_id: str
+    assistant_message_id: str
+    assistant_content: str
 
 
 class PreferencePatchRequest(BaseModel):
@@ -92,4 +107,3 @@ class ItineraryResponse(BaseModel):
     raw_plan_json: dict[str, Any] | None
     created_at: datetime
     updated_at: datetime
-
