@@ -2,8 +2,10 @@
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 # Load environment variables
 load_dotenv()
@@ -36,7 +38,7 @@ if api_key:
             model="deepseek-chat",
             temperature=0,
             base_url="https://api.deepseek.com",
-            api_key=api_key,
+            api_key=SecretStr(api_key),
         )
         tools = [check_weather]
         agent_executor = create_agent(model=llm, tools=tools)
@@ -56,15 +58,14 @@ def main():
         return
 
     try:
-        events = agent_executor.stream(
-            {"messages": [("user", user_input)]},
-            stream_mode="values",
+        result = agent_executor.invoke(
+            {"messages": [HumanMessage(content=user_input)]},
         )
-
-        for event in events:
-            if "messages" in event:
-                last_message = event["messages"][-1]
-                print(f"[{last_message.type.upper()}]: {last_message.content}")
+        messages = result.get("messages", [])
+        if messages:
+            print(f"[AI]: {messages[-1].content}")
+        else:
+            print("[AI]: No response")
     except Exception as e:
         print(f"WARNING: Online run failed ({e}). Switching to fallback mode.")
         _run_fallback_demo(user_input)

@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 # Load environment variables
 load_dotenv()
@@ -70,7 +70,7 @@ if api_key:
         model="deepseek-chat",
         temperature=0,
         base_url="https://api.deepseek.com",
-        api_key=api_key,
+        api_key=SecretStr(api_key),
     )
 
 # --- 3. Create the Parser ---

@@ -5,6 +5,7 @@ import sys
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
 from dotenv import load_dotenv
@@ -453,7 +454,7 @@ def plan_node(state: PlanExecuteState) -> Dict[str, Any]:
     try:
         result = planner.invoke(
             {
-                "objective": state["input"],
+                "objective": state.get("input", ""),
                 "format_instructions": parser.get_format_instructions(),
             }
         )
@@ -540,9 +541,19 @@ def _summarize_tool_output(output: Dict[str, Any]) -> str:
     return json.dumps(output)[:200]
 
 
+def _write_execution_log(results: List[Dict[str, Any]]) -> str:
+    logs_dir = Path("logs")
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    file_path = logs_dir / f"execution_{ts}.json"
+    with file_path.open("w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+    return str(file_path)
+
+
 def finalize_node(state: PlanExecuteState) -> Dict[str, str]:
     if state.get("response"):
-        return {"response": state["response"]}
+        return {"response": state.get("response", "")}
 
     results = state.get("step_results", [])
     if not results:
@@ -565,6 +576,11 @@ def finalize_node(state: PlanExecuteState) -> Dict[str, str]:
 
     lines.append("\nExecution trace (JSON):")
     lines.append(json.dumps(results, ensure_ascii=True, indent=2))
+    try:
+        log_path = _write_execution_log(results)
+        lines.append(f"\nExecution log saved to: {log_path}")
+    except Exception as e:
+        lines.append(f"\nExecution log write failed: {e}")
 
     return {"response": "\n".join(lines)}
 
