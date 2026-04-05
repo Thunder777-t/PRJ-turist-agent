@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -57,6 +58,15 @@ class M2ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["data"]["access_token"]
 
+    def _create_conversation(self, token: str, title: str = "Test Conversation") -> str:
+        response = self.client.post(
+            "/api/v1/conversations",
+            json={"title": title},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["data"]["id"]
+
     def test_register_login_refresh(self) -> None:
         self._register("a@example.com", "user_a")
 
@@ -107,6 +117,65 @@ class M2ApiTests(unittest.TestCase):
         self.assertEqual(c2_list.status_code, 200, c2_list.text)
         listed_ids = [item["id"] for item in c2_list.json()["data"]]
         self.assertNotIn(conversation_id, listed_ids)
+
+    def test_message_pipeline_integration(self) -> None:
+        self._register("m1@example.com", "msg_user")
+        token = self._login_get_access("m1@example.com")
+        conversation_id = self._create_conversation(token, "Pipeline Chat")
+
+        with patch(
+            "backend.app.api.conversations.generate_assistant_reply",
+            return_value="Mocked assistant itinerary response.",
+        ):
+            response = self.client.post(
+                f"/api/v1/conversations/{conversation_id}/messages",
+                json={"content": "Plan a Kyoto trip"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()["data"]
+        self.assertEqual(data["assistant_content"], "Mocked assistant itinerary response.")
+
+        history = self.client.get(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(history.status_code, 200, history.text)
+        messages = history.json()["data"]
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["role"], "user")
+        self.assertEqual(messages[1]["role"], "assistant")
+
+    def test_stream_message_endpoint(self) -> None:
+        self._register("s1@example.com", "stream_user")
+        token = self._login_get_access("s1@example.com")
+        conversation_id = self._create_conversation(token, "Streaming Chat")
+
+        mock_events = [
+            {"type": "message_start", "data": {"input": "hi"}},
+            {"type": "planner", "data": {"plan_count": 2}},
+            {"type": "token", "data": {"text": "Hello "}},
+            {"type": "token", "data": {"text": "world"}},
+            {"type": "message_end", "data": {"response": "Hello world"}},
+        ]
+
+        with patch(
+            "backend.app.api.conversations.stream_assistant_events",
+            return_value=iter(mock_events),
+        ):
+            with self.client.stream(
+                "POST",
+                f"/api/v1/conversations/{conversation_id}/stream",
+                json={"content": "Plan a trip"},
+                headers={"Authorization": f"Bearer {token}"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                body = "".join(response.iter_text())
+
+        self.assertIn("event: message_start", body)
+        self.assertIn("event: token", body)
+        self.assertIn("event: message_end", body)
+        self.assertIn("event: persisted", body)
 
 
 if __name__ == "__main__":

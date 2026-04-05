@@ -1,11 +1,13 @@
 # Backend (M2)
 
-This folder now includes M2 backend implementation:
+This folder now includes M2 + M3 backend implementation:
 - FastAPI app scaffold
 - Auth endpoints (register/login/refresh/logout)
 - SQLite persistence with SQLAlchemy models
 - Alembic migration setup and first revision
 - User-isolated conversation endpoints
+- Graph pipeline-backed assistant message endpoint
+- SSE streaming endpoint for realtime assistant events
 
 ## Quick start
 

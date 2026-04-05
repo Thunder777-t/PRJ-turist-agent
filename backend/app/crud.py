@@ -161,3 +161,30 @@ def list_user_messages(
         .limit(limit)
     )
     return list(db.scalars(stmt).all())
+
+
+def create_itinerary(
+    db: Session,
+    user_id: str,
+    conversation_id: str | None,
+    title: str,
+    destination: str,
+    summary: str,
+    total_budget: float | None = None,
+    currency: str = "USD",
+    raw_plan_json: dict | None = None,
+) -> models.Itinerary:
+    itinerary = models.Itinerary(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        title=title,
+        destination=destination,
+        summary=summary,
+        total_budget=total_budget,
+        currency=currency,
+        raw_plan_json=raw_plan_json,
+    )
+    db.add(itinerary)
+    db.commit()
+    db.refresh(itinerary)
+    return itinerary

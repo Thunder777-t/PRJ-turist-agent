@@ -1,10 +1,16 @@
+import json
+import re
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .. import crud
 from ..database import get_db
 from ..models import User
 from ..schemas import ChatResponse, ConversationCreateRequest, MessageCreateRequest
+from ..services.assistant_service import generate_assistant_reply, stream_assistant_events
 from .deps import get_current_user
 
 
@@ -131,16 +137,20 @@ def create_message(
         content=payload.content,
     )
 
-    # M2 placeholder assistant output.
-    assistant_content = (
-        "Message received. Travel planning pipeline integration will be connected in M3."
-    )
+    assistant_content = generate_assistant_reply(payload.content)
     assistant_msg = crud.create_message(
         db=db,
         user_id=current_user.id,
         conversation_id=conversation_id,
         role="assistant",
         content=assistant_content,
+    )
+    _save_auto_itinerary(
+        db=db,
+        user_id=current_user.id,
+        conversation_id=conversation_id,
+        user_input=payload.content,
+        assistant_content=assistant_content,
     )
 
     return {
@@ -153,3 +163,101 @@ def create_message(
         "error": None,
     }
 
+
+def _extract_destination_from_text(text: str) -> str:
+    match = re.search(r"\bto\s+([A-Za-z][A-Za-z\s\-]{1,60})", text, re.IGNORECASE)
+    if not match:
+        return "Unknown"
+    destination = match.group(1).strip(" .,")
+    for stop_word in [" with ", " for ", " on ", " including "]:
+        idx = destination.lower().find(stop_word)
+        if idx != -1:
+            destination = destination[:idx].strip()
+    return destination or "Unknown"
+
+
+def _save_auto_itinerary(
+    db: Session,
+    user_id: str,
+    conversation_id: str,
+    user_input: str,
+    assistant_content: str,
+) -> None:
+    try:
+        destination = _extract_destination_from_text(user_input)
+        title = f"Auto itinerary {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
+        crud.create_itinerary(
+            db=db,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            title=title,
+            destination=destination,
+            summary=assistant_content[:3000],
+            raw_plan_json={"source": "graph_pipeline", "input": user_input},
+        )
+    except Exception:
+        # Itinerary auto-save failure should not block chat response.
+        return
+
+
+def _format_sse(event_type: str, data: dict) -> str:
+    return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.post("/{conversation_id}/stream")
+def stream_message(
+    conversation_id: str,
+    payload: MessageCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conversation = crud.get_user_conversation(db, user_id=current_user.id, conversation_id=conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found.",
+        )
+
+    crud.create_message(
+        db=db,
+        user_id=current_user.id,
+        conversation_id=conversation_id,
+        role="user",
+        content=payload.content,
+    )
+
+    def event_generator():
+        final_response = ""
+        for event in stream_assistant_events(payload.content):
+            event_type = event.get("type", "message")
+            event_data = event.get("data", {})
+            if event_type == "message_end":
+                final_response = event_data.get("response", "")
+            yield _format_sse(event_type, event_data)
+
+        if final_response:
+            assistant_msg = crud.create_message(
+                db=db,
+                user_id=current_user.id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=final_response,
+            )
+            _save_auto_itinerary(
+                db=db,
+                user_id=current_user.id,
+                conversation_id=conversation_id,
+                user_input=payload.content,
+                assistant_content=final_response,
+            )
+            yield _format_sse("persisted", {"assistant_message_id": assistant_msg.id})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
