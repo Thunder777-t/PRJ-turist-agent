@@ -1,0 +1,39 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: tourist-agent-backend
+    restart: unless-stopped
+    environment:
+      APP_NAME: Tourist Assistant
+      APP_ENV: production
+      DATABASE_URL: sqlite:////app/data/tourist_agent.db
+      JWT_SECRET: ${JWT_SECRET:-change-this-before-production}
+      JWT_ACCESS_MINUTES: ${JWT_ACCESS_MINUTES:-30}
+      JWT_REFRESH_DAYS: ${JWT_REFRESH_DAYS:-14}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-https://your-domain.com}
+      ENABLE_TRUSTED_HOST: ${ENABLE_TRUSTED_HOST:-true}
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-your-domain.com,www.your-domain.com}
+      CREATE_TABLES_ON_STARTUP: ${CREATE_TABLES_ON_STARTUP:-false}
+      DOCS_ENABLED: ${DOCS_ENABLED:-false}
+      SECURITY_HEADERS_ENABLED: ${SECURITY_HEADERS_ENABLED:-true}
+      HSTS_ENABLED: ${HSTS_ENABLED:-true}
+      DeepSeek_API_KEY: ${DeepSeek_API_KEY:-}
+    volumes:
+      - tourist_agent_data:/app/data
+      - ./logs:/app/logs
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: tourist-agent-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  tourist_agent_data:
