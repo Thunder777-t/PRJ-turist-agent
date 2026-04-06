@@ -4,16 +4,36 @@ import {
   clearStoredAuth,
   createConversation,
   getMe,
+  getPreferences,
   getStoredAuth,
   listConversations,
   listMessages,
   login,
   logout,
+  patchPreferences,
   register,
   setStoredAuth,
   streamMessage,
 } from "./lib/api";
-import type { Conversation, Message, StreamEvent, Tokens, User } from "./types";
+import type { Conversation, Message, Preference, StreamEvent, Tokens, User } from "./types";
+
+type PreferenceForm = {
+  language: string;
+  timezone: string;
+  budget_level: string;
+  interests_text: string;
+  dietary_text: string;
+  mobility_notes: string;
+};
+
+const DEFAULT_PREFERENCE_FORM: PreferenceForm = {
+  language: "en",
+  timezone: "UTC",
+  budget_level: "medium",
+  interests_text: "",
+  dietary_text: "",
+  mobility_notes: "",
+};
 
 function formatTime(input: string): string {
   return new Date(input).toLocaleString([], { hour: "2-digit", minute: "2-digit" });
@@ -41,6 +61,27 @@ function messageContentFromEvent(event: StreamEvent): string {
   return "";
 }
 
+function splitCsv(input: string): string[] {
+  return input
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function toPreferenceForm(pref: Preference | null): PreferenceForm {
+  if (!pref) {
+    return DEFAULT_PREFERENCE_FORM;
+  }
+  return {
+    language: pref.language || "en",
+    timezone: pref.timezone || "UTC",
+    budget_level: pref.budget_level || "medium",
+    interests_text: (pref.interests || []).join(", "),
+    dietary_text: (pref.dietary || []).join(", "),
+    mobility_notes: pref.mobility_notes || "",
+  };
+}
+
 export default function App() {
   const [tokens, setTokens] = useState<Tokens | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -60,6 +101,13 @@ export default function App() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [streamLogs, setStreamLogs] = useState<string[]>([]);
 
+  const [showPreferences, setShowPreferences] = useState(false);
+  const [preferences, setPreferences] = useState<Preference | null>(null);
+  const [preferenceForm, setPreferenceForm] = useState<PreferenceForm>(DEFAULT_PREFERENCE_FORM);
+  const [prefBusy, setPrefBusy] = useState(false);
+  const [prefError, setPrefError] = useState<string | null>(null);
+  const [prefSuccess, setPrefSuccess] = useState<string | null>(null);
+
   const selectedConversation = useMemo(
     () => conversations.find((item) => item.id === selectedConversationId) ?? null,
     [conversations, selectedConversationId],
@@ -76,6 +124,9 @@ export default function App() {
     setConversations([]);
     setSelectedConversationId(null);
     setMessages([]);
+    setPreferences(null);
+    setPreferenceForm(DEFAULT_PREFERENCE_FORM);
+    setShowPreferences(false);
     clearStoredAuth();
   };
 
@@ -102,16 +153,16 @@ export default function App() {
     const loadUserAndConversations = async () => {
       try {
         const auth = getAuthContext(tokens);
-        const me = await getMe(auth);
+        const [me, list, pref] = await Promise.all([
+          getMe(auth),
+          listConversations(auth),
+          getPreferences(auth),
+        ]);
         if (cancelled) {
           return;
         }
-        setUser(me);
 
-        const list = await listConversations(auth);
-        if (cancelled) {
-          return;
-        }
+        setUser(me);
         setConversations(list);
         setSelectedConversationId((current) => {
           if (current && list.some((item) => item.id === current)) {
@@ -119,6 +170,8 @@ export default function App() {
           }
           return list[0]?.id ?? null;
         });
+        setPreferences(pref);
+        setPreferenceForm(toPreferenceForm(pref));
       } catch (error) {
         if (cancelled) {
           return;
@@ -210,6 +263,35 @@ export default function App() {
       const next = [...prev, line];
       return next.slice(-6);
     });
+  };
+
+  const handleSavePreferences = async () => {
+    if (!tokens || prefBusy) {
+      return;
+    }
+    setPrefBusy(true);
+    setPrefError(null);
+    setPrefSuccess(null);
+
+    try {
+      const payload = {
+        language: preferenceForm.language.trim() || "en",
+        timezone: preferenceForm.timezone.trim() || "UTC",
+        budget_level: preferenceForm.budget_level.trim() || "medium",
+        interests: splitCsv(preferenceForm.interests_text),
+        dietary: splitCsv(preferenceForm.dietary_text),
+        mobility_notes: preferenceForm.mobility_notes.trim() || null,
+      };
+
+      const saved = await patchPreferences(payload, getAuthContext(tokens));
+      setPreferences(saved);
+      setPreferenceForm(toPreferenceForm(saved));
+      setPrefSuccess("Preferences saved.");
+    } catch (error) {
+      setPrefError(error instanceof Error ? error.message : "Failed to save preferences.");
+    } finally {
+      setPrefBusy(false);
+    }
   };
 
   const handleSendMessage = async () => {
@@ -411,6 +493,10 @@ export default function App() {
           + New Chat
         </button>
 
+        <button className="ghost" type="button" onClick={() => setShowPreferences(true)}>
+          Preferences
+        </button>
+
         <div className="conversation-list">
           {conversations.map((conversation) => (
             <button
@@ -476,6 +562,83 @@ export default function App() {
           </div>
         </section>
       </main>
+
+      <div
+        className={`prefs-overlay ${showPreferences ? "open" : ""}`}
+        onClick={() => setShowPreferences(false)}
+        role="button"
+        tabIndex={0}
+      />
+      <aside className={`prefs-drawer ${showPreferences ? "open" : ""}`}>
+        <div className="prefs-header">
+          <h3>Travel Preferences</h3>
+          <button className="ghost" type="button" onClick={() => setShowPreferences(false)}>
+            Close
+          </button>
+        </div>
+
+        <div className="prefs-form">
+          <label htmlFor="pref-language">Language</label>
+          <input
+            id="pref-language"
+            value={preferenceForm.language}
+            onChange={(event) => setPreferenceForm((prev) => ({ ...prev, language: event.target.value }))}
+          />
+
+          <label htmlFor="pref-timezone">Timezone</label>
+          <input
+            id="pref-timezone"
+            value={preferenceForm.timezone}
+            onChange={(event) => setPreferenceForm((prev) => ({ ...prev, timezone: event.target.value }))}
+          />
+
+          <label htmlFor="pref-budget">Budget Level</label>
+          <select
+            id="pref-budget"
+            value={preferenceForm.budget_level}
+            onChange={(event) => setPreferenceForm((prev) => ({ ...prev, budget_level: event.target.value }))}
+          >
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+
+          <label htmlFor="pref-interests">Interests (comma separated)</label>
+          <input
+            id="pref-interests"
+            value={preferenceForm.interests_text}
+            onChange={(event) => setPreferenceForm((prev) => ({ ...prev, interests_text: event.target.value }))}
+            placeholder="food, anime, museums, hiking"
+          />
+
+          <label htmlFor="pref-dietary">Dietary (comma separated)</label>
+          <input
+            id="pref-dietary"
+            value={preferenceForm.dietary_text}
+            onChange={(event) => setPreferenceForm((prev) => ({ ...prev, dietary_text: event.target.value }))}
+            placeholder="vegetarian, halal"
+          />
+
+          <label htmlFor="pref-mobility">Mobility Notes</label>
+          <textarea
+            id="pref-mobility"
+            value={preferenceForm.mobility_notes}
+            onChange={(event) => setPreferenceForm((prev) => ({ ...prev, mobility_notes: event.target.value }))}
+            placeholder="stairs should be minimized"
+          />
+
+          {prefError ? <div className="error-text">{prefError}</div> : null}
+          {prefSuccess ? <div className="ok-text">{prefSuccess}</div> : null}
+
+          <button className="primary" type="button" onClick={handleSavePreferences} disabled={prefBusy}>
+            {prefBusy ? "Saving..." : "Save Preferences"}
+          </button>
+
+          <p className="prefs-meta">
+            Last update: {preferences?.updated_at ? new Date(preferences.updated_at).toLocaleString() : "N/A"}
+          </p>
+        </div>
+      </aside>
     </div>
   );
 }

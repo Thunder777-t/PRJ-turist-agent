@@ -137,6 +137,23 @@ body {
   border-color: var(--accent);
 }
 
+input,
+select,
+textarea {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  outline: none;
+  font: inherit;
+  background: #fff;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
 button.primary,
 button.ghost {
   border: 0;
@@ -164,6 +181,11 @@ button.ghost {
 
 .error-text {
   color: #af2f2f;
+  font-size: 0.88rem;
+}
+
+.ok-text {
+  color: #1e7f63;
   font-size: 0.88rem;
 }
 
@@ -343,14 +365,78 @@ button.ghost {
   min-height: 72px;
   resize: vertical;
   border-radius: 12px;
-  border: 1px solid var(--line);
-  padding: 10px 12px;
-  font: inherit;
 }
 
-.composer textarea:focus {
-  outline: none;
-  border-color: var(--accent);
+.prefs-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(22, 37, 39, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.prefs-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.prefs-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(420px, 96vw);
+  background: linear-gradient(180deg, #fbffff, #f0f8f7);
+  box-shadow: -12px 0 28px rgba(16, 32, 35, 0.22);
+  border-left: 1px solid #d7e5e6;
+  transform: translateX(100%);
+  transition: transform 220ms ease;
+  z-index: 30;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.prefs-drawer.open {
+  transform: translateX(0);
+}
+
+.prefs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid #dbe9e9;
+}
+
+.prefs-header h3 {
+  margin: 0;
+  font-family: "Fraunces", serif;
+}
+
+.prefs-form {
+  padding: 12px 14px 24px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  overflow-y: auto;
+}
+
+.prefs-form label {
+  color: var(--soft-ink);
+  font-size: 0.84rem;
+}
+
+.prefs-form textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.prefs-meta {
+  margin: 0;
+  color: var(--soft-ink);
+  font-size: 0.82rem;
 }
 
 @media (max-width: 960px) {
@@ -370,5 +456,9 @@ button.ghost {
 
   .bubble {
     max-width: 92%;
+  }
+
+  .prefs-drawer {
+    width: 100vw;
   }
 }

@@ -39,3 +39,22 @@ export type StreamEvent = {
   event: string;
   data: Record<string, unknown>;
 };
+
+export type Preference = {
+  language: string;
+  timezone: string;
+  budget_level: string;
+  interests: string[];
+  dietary: string[];
+  mobility_notes: string | null;
+  updated_at?: string;
+};
+
+export type PreferencePatch = {
+  language?: string;
+  timezone?: string;
+  budget_level?: string;
+  interests?: string[];
+  dietary?: string[];
+  mobility_notes?: string | null;
+};

@@ -1,4 +1,13 @@
-import type { ApiEnvelope, Conversation, Message, StreamEvent, Tokens, User } from "../types";
+import type {
+  ApiEnvelope,
+  Conversation,
+  Message,
+  Preference,
+  PreferencePatch,
+  StreamEvent,
+  Tokens,
+  User,
+} from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1";
 const AUTH_KEY = "tourist_agent_auth";
@@ -135,6 +144,26 @@ export async function listMessages(conversationId: string, auth: AuthContext): P
     auth,
   );
   return parseEnvelope<Message[]>(response);
+}
+
+export async function getPreferences(auth: AuthContext): Promise<Preference | null> {
+  const response = await authorizedFetch("/preferences", { method: "GET" }, auth);
+  return parseEnvelope<Preference | null>(response);
+}
+
+export async function patchPreferences(
+  payload: PreferencePatch,
+  auth: AuthContext,
+): Promise<Preference> {
+  const response = await authorizedFetch(
+    "/preferences",
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+    auth,
+  );
+  return parseEnvelope<Preference>(response);
 }
 
 function parseEvent(raw: string): StreamEvent | null {

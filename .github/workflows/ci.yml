@@ -28,6 +28,7 @@ jobs:
         run: |
           python -m unittest backend/tests/test_m2_api.py
           python -m unittest backend/tests/test_m5_security.py
+          python -m unittest backend/tests/test_m7_profile_api.py
 
   frontend-build:
     runs-on: ubuntu-latest
