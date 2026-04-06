@@ -24,6 +24,7 @@ load_dotenv()
 
 class PlanExecuteState(TypedDict, total=False):
     input: str
+    user_preferences: Dict[str, Any]
     plan: List[str]
     step_results: Annotated[List[Dict[str, Any]], operator.add]
     response: str
@@ -446,15 +447,56 @@ def _fallback_plan_for_graph(user_input: str) -> List[str]:
     ]
 
 
+def _compact_preference_text(preferences: Dict[str, Any]) -> str:
+    if not preferences:
+        return ""
+
+    parts: List[str] = []
+    language = preferences.get("language")
+    timezone = preferences.get("timezone")
+    budget = preferences.get("budget_level")
+    interests = preferences.get("interests", [])
+    dietary = preferences.get("dietary", [])
+    mobility = preferences.get("mobility_notes")
+
+    if language:
+        parts.append(f"language={language}")
+    if timezone:
+        parts.append(f"timezone={timezone}")
+    if budget:
+        parts.append(f"budget_level={budget}")
+    if interests:
+        parts.append("interests=" + ", ".join(str(i) for i in interests[:5]))
+    if dietary:
+        parts.append("dietary=" + ", ".join(str(i) for i in dietary[:5]))
+    if mobility:
+        parts.append(f"mobility_notes={mobility}")
+    return "; ".join(parts)
+
+
+def _build_objective_with_preferences(user_input: str, preferences: Dict[str, Any]) -> str:
+    pref_text = _compact_preference_text(preferences)
+    if not pref_text:
+        return user_input
+    return (
+        f"{user_input}\n\n"
+        "User preference profile (must be reflected in plan/budget/transport decisions):\n"
+        f"{pref_text}"
+    )
+
+
 def plan_node(state: PlanExecuteState) -> Dict[str, Any]:
     print("\n[PLANNER] Planning...")
     planner = create_planner()
     parser = PydanticOutputParser(pydantic_object=Plan)
 
+    preferences = state.get("user_preferences", {})
+    objective = _build_objective_with_preferences(state.get("input", ""), preferences)
+
     try:
         result = planner.invoke(
             {
-                "objective": state.get("input", ""),
+                "objective": objective,
                 "format_instructions": parser.get_format_instructions(),
             }
         )
@@ -560,6 +602,11 @@ def finalize_node(state: PlanExecuteState) -> Dict[str, str]:
         return {"response": "No itinerary could be produced."}
 
     lines: List[str] = ["Final itinerary draft (Plan-and-Execute):"]
+    pref_summary = _compact_preference_text(state.get("user_preferences", {}))
+    if pref_summary:
+        lines.append(f"Personalization profile applied: {pref_summary}")
+        lines.append("")
+
     for item in results:
         lines.append(f"{item['step_id']}. {item['step']}")
         lines.append(

@@ -21,11 +21,15 @@ def _load_graph_module():
     return importlib.import_module("graph")
 
 
-def generate_assistant_reply(user_input: str) -> str:
+def generate_assistant_reply(user_input: str, user_preferences: dict[str, Any] | None = None) -> str:
     try:
         graph_module = _load_graph_module()
         final_state = graph_module.app.invoke(
-            {"input": user_input, "step_results": []},
+            {
+                "input": user_input,
+                "step_results": [],
+                "user_preferences": user_preferences or {},
+            },
             {"recursion_limit": 50},
         )
         response = final_state.get("response", "")
@@ -34,13 +38,23 @@ def generate_assistant_reply(user_input: str) -> str:
         return _fallback_response(user_input)
 
 
-def stream_assistant_events(user_input: str) -> Generator[dict[str, Any], None, None]:
-    yield {"type": "message_start", "data": {"input": user_input}}
+def stream_assistant_events(
+    user_input: str,
+    user_preferences: dict[str, Any] | None = None,
+) -> Generator[dict[str, Any], None, None]:
+    yield {
+        "type": "message_start",
+        "data": {"input": user_input, "preferences_applied": bool(user_preferences)},
+    }
 
     try:
         graph_module = _load_graph_module()
         stream = graph_module.app.stream(
-            {"input": user_input, "step_results": []},
+            {
+                "input": user_input,
+                "step_results": [],
+                "user_preferences": user_preferences or {},
+            },
             {"recursion_limit": 50},
         )
         for event in stream:
@@ -84,4 +98,3 @@ def stream_assistant_events(user_input: str) -> Generator[dict[str, Any], None, 
         for chunk in _chunk_text(fallback):
             yield {"type": "token", "data": {"text": chunk}}
         yield {"type": "message_end", "data": {"response": fallback}}
-

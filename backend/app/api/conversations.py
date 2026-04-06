@@ -137,7 +137,8 @@ def create_message(
         content=payload.content,
     )
 
-    assistant_content = generate_assistant_reply(payload.content)
+    preference_payload = _build_user_preference_payload(current_user)
+    assistant_content = generate_assistant_reply(payload.content, preference_payload)
     assistant_msg = crud.create_message(
         db=db,
         user_id=current_user.id,
@@ -174,6 +175,20 @@ def _extract_destination_from_text(text: str) -> str:
         if idx != -1:
             destination = destination[:idx].strip()
     return destination or "Unknown"
+
+
+def _build_user_preference_payload(current_user: User) -> dict:
+    pref = current_user.preference
+    if not pref:
+        return {}
+    return {
+        "language": pref.language,
+        "timezone": pref.timezone,
+        "budget_level": pref.budget_level,
+        "interests": pref.interests_json or [],
+        "dietary": pref.dietary_json or [],
+        "mobility_notes": pref.mobility_notes or "",
+    }
 
 
 def _save_auto_itinerary(
@@ -226,9 +241,11 @@ def stream_message(
         content=payload.content,
     )
 
+    preference_payload = _build_user_preference_payload(current_user)
+
     def event_generator():
         final_response = ""
-        for event in stream_assistant_events(payload.content):
+        for event in stream_assistant_events(payload.content, preference_payload):
             event_type = event.get("type", "message")
             event_data = event.get("data", {})
             if event_type == "message_end":

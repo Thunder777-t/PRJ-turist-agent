@@ -102,6 +102,8 @@ def create_planner():
                 "Focus on information gathering and itinerary creation steps.\n"
                 "Do NOT execute the steps, just list them.\n"
                 "Each step must be actionable and tool-friendly (weather, place search, hotels, transport, budget).\n"
+                "When user preference profile is provided (language/timezone/budget/interests/dietary/mobility), "
+                "you MUST reflect it in the steps and explicitly adapt budget and transport choices.\n"
                 "Include one explicit verification step for attraction existence/opening information.\n"
                 "For example, if user asks 'Trip to Paris', your steps might be: "
                 "['Search for top attractions in Paris', 'Find hotels in Paris', 'Create a daily itinerary'].\n\n"

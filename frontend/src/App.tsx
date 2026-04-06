@@ -346,6 +346,14 @@ export default function App() {
       ]);
 
       await streamMessage(conversationId, content, getAuthContext(tokens), (event) => {
+        if (event.event === "message_start") {
+          const applied = event.data.preferences_applied === true;
+          if (applied) {
+            pushStreamLog("Personalization profile applied");
+          }
+          return;
+        }
+
         if (event.event === "planner") {
           const count = typeof event.data.plan_count === "number" ? event.data.plan_count : "?";
           pushStreamLog(`Planner generated ${count} steps`);

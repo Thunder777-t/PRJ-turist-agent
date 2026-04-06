@@ -1,11 +1,24 @@
-﻿import os
+import os
 
 from dotenv import load_dotenv
-from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage
-from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-from pydantic import SecretStr
+
+LANGCHAIN_READY = True
+try:
+    from langchain.agents import create_agent
+    from langchain_core.messages import HumanMessage
+    from langchain_core.tools import tool
+    from langchain_openai import ChatOpenAI
+    from pydantic import SecretStr
+except ModuleNotFoundError:
+    LANGCHAIN_READY = False
+    create_agent = None
+    HumanMessage = None
+    ChatOpenAI = None
+    SecretStr = None
+
+    def tool(func):  # type: ignore[no-redef]
+        return func
+
 
 # Load environment variables
 load_dotenv()
@@ -25,14 +38,17 @@ def _run_fallback_demo(user_input: str) -> None:
     city = "London"
     print("[HUMAN]:", user_input)
     print("[AI]: I will use the local weather tool fallback.")
-    print("[TOOL]:", check_weather.invoke({"city": city}))
+    if hasattr(check_weather, "invoke"):
+        print("[TOOL]:", check_weather.invoke({"city": city}))
+    else:
+        print("[TOOL]:", check_weather(city))
     print("[AI]: Fallback mode completed successfully.")
 
 
 # --- 2. Initialize optional LLM and Agent ---
 llm = None
 agent_executor = None
-if api_key:
+if api_key and LANGCHAIN_READY:
     try:
         llm = ChatOpenAI(
             model="deepseek-chat",
@@ -44,6 +60,8 @@ if api_key:
         agent_executor = create_agent(model=llm, tools=tools)
     except Exception as e:
         print(f"WARNING: Failed to initialize online agent ({e}). Falling back to local mode.")
+elif api_key and not LANGCHAIN_READY:
+    print("WARNING: langchain package missing. Falling back to local mode.")
 
 
 # --- 3. Run the Agent ---
