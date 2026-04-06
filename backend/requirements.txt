@@ -6,3 +6,8 @@ python-jose[cryptography]==3.5.0
 passlib[argon2]==1.7.4
 email-validator==2.3.0
 httpx==0.28.1
+python-dotenv==1.2.1
+langchain==1.2.15
+langchain-core==1.2.26
+langchain-openai==1.1.7
+langgraph==1.1.6
