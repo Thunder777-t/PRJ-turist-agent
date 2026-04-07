@@ -52,6 +52,34 @@ WEATHER_CODE_MAP = {
     95: "Thunderstorm",
 }
 
+CHINESE_NUM_MAP = {
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
+
+
+def _parse_simple_chinese_number(text: str) -> int | None:
+    if not text:
+        return None
+    if text in CHINESE_NUM_MAP:
+        return CHINESE_NUM_MAP[text]
+    if len(text) == 2 and text[0] == "十" and text[1] in CHINESE_NUM_MAP:
+        return 10 + CHINESE_NUM_MAP[text[1]]
+    if len(text) == 2 and text[1] == "十" and text[0] in CHINESE_NUM_MAP:
+        return CHINESE_NUM_MAP[text[0]] * 10
+    if len(text) == 3 and text[1] == "十" and text[0] in CHINESE_NUM_MAP and text[2] in CHINESE_NUM_MAP:
+        return CHINESE_NUM_MAP[text[0]] * 10 + CHINESE_NUM_MAP[text[2]]
+    return None
+
 
 def _contains_keyword(text: str, keywords: List[str]) -> bool:
     lower = text.lower()
@@ -87,6 +115,15 @@ def _http_get_json(
 
 
 def _extract_destination(user_input: str) -> str:
+    cn_match = re.search(
+        r"(?:我想要去|我想去|想要去|想去|去|到|前往)\s*([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9·\-\s]{0,20}?)(?=旅游|旅行|游玩|玩|待|住|[0-9一二三四五六七八九十两]|\s*$)",
+        user_input,
+    )
+    if cn_match:
+        destination = cn_match.group(1).strip(" ，。,.")
+        if destination:
+            return destination
+
     match = re.search(r"\bto\s+([A-Za-z][A-Za-z\s\-]{1,50})", user_input, re.IGNORECASE)
     if not match:
         return ""
@@ -100,12 +137,17 @@ def _extract_destination(user_input: str) -> str:
 
 
 def _extract_days(text: str) -> int:
-    patterns = [r"(\d+)\s*-\s*day", r"(\d+)\s*day", r"(\d+)\s*days"]
+    patterns = [r"(\d+)\s*-\s*day", r"(\d+)\s*day", r"(\d+)\s*days", r"(\d+)\s*天"]
     lower = text.lower()
     for pattern in patterns:
         match = re.search(pattern, lower)
         if match:
             return max(1, int(match.group(1)))
+    cn_days = re.search(r"([一二三四五六七八九十两]{1,3})\s*天", text)
+    if cn_days:
+        parsed = _parse_simple_chinese_number(cn_days.group(1))
+        if parsed:
+            return max(1, parsed)
     return 3
 
 
@@ -447,6 +489,23 @@ def _fallback_plan_for_graph(user_input: str) -> List[str]:
     ]
 
 
+def _normalize_plan_steps(steps: List[str], user_input: str) -> List[str]:
+    destination = _extract_destination(user_input)
+    days = _extract_days(user_input)
+    normalized: List[str] = []
+
+    for step in steps:
+        line = step
+        if destination:
+            line = re.sub(r"\bdestination\b", destination, line, flags=re.IGNORECASE)
+        line = re.sub(r"\b\d+\s*-\s*day\b|\b\d+\s*days?\b", f"{days}-day", line, flags=re.IGNORECASE)
+        normalized.append(line)
+
+    if destination and not any(destination.lower() in item.lower() for item in normalized):
+        normalized = _fallback_plan_for_graph(user_input)
+    return normalized
+
+
 def _compact_preference_text(preferences: Dict[str, Any]) -> str:
     if not preferences:
         return ""
@@ -491,7 +550,16 @@ def plan_node(state: PlanExecuteState) -> Dict[str, Any]:
     parser = PydanticOutputParser(pydantic_object=Plan)
 
     preferences = state.get("user_preferences", {})
-    objective = _build_objective_with_preferences(state.get("input", ""), preferences)
+    user_input = state.get("input", "")
+    destination = _extract_destination(user_input)
+    days = _extract_days(user_input)
+    objective = _build_objective_with_preferences(user_input, preferences)
+    if destination:
+        objective += (
+            "\n\nExtraction hint:\n"
+            f"- destination: {destination}\n"
+            f"- trip_length_days: {days}"
+        )
 
     try:
         result = planner.invoke(
@@ -501,14 +569,15 @@ def plan_node(state: PlanExecuteState) -> Dict[str, Any]:
             }
         )
         steps = result.steps if result and getattr(result, "steps", None) else []
+        steps = _normalize_plan_steps(steps, user_input)
         if not steps:
-            fallback = _fallback_plan_for_graph(state.get("input", ""))
+            fallback = _fallback_plan_for_graph(user_input)
             print("WARNING: Planner returned empty steps. Using fallback plan.")
             return {"plan": fallback}
         return {"plan": steps}
     except Exception as e:
         print(f"WARNING: Planning failed ({e}). Using fallback plan.")
-        fallback = _fallback_plan_for_graph(state.get("input", ""))
+        fallback = _fallback_plan_for_graph(user_input)
         return {"plan": fallback}
 
 

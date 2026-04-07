@@ -14,6 +14,34 @@ load_dotenv()
 # Optional API key. If missing, we fall back to a local rule-based planner.
 api_key = os.getenv("DeepSeek_API_KEY")
 
+CHINESE_NUM_MAP = {
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
+
+
+def _parse_simple_chinese_number(text: str) -> int | None:
+    if not text:
+        return None
+    if text in CHINESE_NUM_MAP:
+        return CHINESE_NUM_MAP[text]
+    if len(text) == 2 and text[0] == "十" and text[1] in CHINESE_NUM_MAP:
+        return 10 + CHINESE_NUM_MAP[text[1]]
+    if len(text) == 2 and text[1] == "十" and text[0] in CHINESE_NUM_MAP:
+        return CHINESE_NUM_MAP[text[0]] * 10
+    if len(text) == 3 and text[1] == "十" and text[0] in CHINESE_NUM_MAP and text[2] in CHINESE_NUM_MAP:
+        return CHINESE_NUM_MAP[text[0]] * 10 + CHINESE_NUM_MAP[text[2]]
+    return None
+
 
 # --- 1. Define the Plan Structure ---
 class Plan(BaseModel):
@@ -25,6 +53,15 @@ class Plan(BaseModel):
 
 
 def _extract_destination(user_input: str) -> str:
+    cn_match = re.search(
+        r"(?:我想要去|我想去|想要去|想去|去|到|前往)\s*([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9·\-\s]{0,20}?)(?=旅游|旅行|游玩|玩|待|住|[0-9一二三四五六七八九十两]|\s*$)",
+        user_input,
+    )
+    if cn_match:
+        destination = cn_match.group(1).strip(" ，。,.")
+        if destination:
+            return destination
+
     match = re.search(r"\bto\s+([A-Za-z][A-Za-z\s\-]{1,50})", user_input, re.IGNORECASE)
     if not match:
         return "your destination"
@@ -38,8 +75,13 @@ def _extract_destination(user_input: str) -> str:
 
 
 def _extract_days(user_input: str) -> int:
-    match = re.search(r"(\d+)\s*-\s*day|(\d+)\s*day|(\d+)\s*days", user_input.lower())
+    match = re.search(r"(\d+)\s*-\s*day|(\d+)\s*day|(\d+)\s*days|(\d+)\s*天", user_input.lower())
     if not match:
+        cn_days = re.search(r"([一二三四五六七八九十两]{1,3})\s*天", user_input)
+        if cn_days:
+            parsed = _parse_simple_chinese_number(cn_days.group(1))
+            if parsed:
+                return max(1, parsed)
         return 3
 
     value = next((group for group in match.groups() if group), "3")
@@ -104,6 +146,8 @@ def create_planner():
                 "Each step must be actionable and tool-friendly (weather, place search, hotels, transport, budget).\n"
                 "When user preference profile is provided (language/timezone/budget/interests/dietary/mobility), "
                 "you MUST reflect it in the steps and explicitly adapt budget and transport choices.\n"
+                "You MUST explicitly extract and use the exact destination and trip length from user request.\n"
+                "Do not use placeholders like 'the destination'; use concrete city/place names in each major step.\n"
                 "Include one explicit verification step for attraction existence/opening information.\n"
                 "For example, if user asks 'Trip to Paris', your steps might be: "
                 "['Search for top attractions in Paris', 'Find hotels in Paris', 'Create a daily itinerary'].\n\n"

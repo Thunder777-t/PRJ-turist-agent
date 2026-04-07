@@ -183,6 +183,15 @@ def create_message(
 
 
 def _extract_destination_from_text(text: str) -> str:
+    cn_match = re.search(
+        r"(?:我想要去|我想去|想要去|想去|去|到|前往)\s*([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9·\-\s]{0,20}?)(?=旅游|旅行|游玩|玩|待|住|[0-9一二三四五六七八九十两]|\s*$)",
+        text,
+    )
+    if cn_match:
+        destination_cn = cn_match.group(1).strip(" ，。,.")
+        if destination_cn:
+            return destination_cn
+
     match = re.search(r"\bto\s+([A-Za-z][A-Za-z\s\-]{1,60})", text, re.IGNORECASE)
     if not match:
         return "Unknown"

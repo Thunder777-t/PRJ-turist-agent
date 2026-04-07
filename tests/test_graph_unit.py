@@ -39,6 +39,11 @@ class GraphRoutingTests(unittest.TestCase):
         self.assertTrue(any("Kyoto" in step for step in steps))
         self.assertTrue(any("2-day" in step for step in steps))
 
+    def test_extract_destination_and_days_chinese(self) -> None:
+        text = "我想要去成都旅游7天"
+        self.assertEqual(graph._extract_destination(text), "成都")
+        self.assertEqual(graph._extract_days(text), 7)
+
 
 if __name__ == "__main__":
     unittest.main()
