@@ -29,6 +29,24 @@ CHINESE_NUM_MAP = {
 }
 
 
+def _normalize_destination_name(destination: str) -> str:
+    text = destination.strip().replace("中国", "").strip()
+    suffixes = [
+        "回族自治区",
+        "维吾尔自治区",
+        "壮族自治区",
+        "自治区",
+        "特别行政区",
+        "省",
+        "市",
+    ]
+    for suffix in suffixes:
+        if text.endswith(suffix) and len(text) > len(suffix):
+            text = text[: -len(suffix)].strip()
+            break
+    return text or destination.strip()
+
+
 def _parse_simple_chinese_number(text: str) -> int | None:
     if not text:
         return None
@@ -60,7 +78,7 @@ def _extract_destination(user_input: str) -> str:
     if cn_match:
         destination = cn_match.group(1).strip(" ，。,.")
         if destination:
-            return destination
+            return _normalize_destination_name(destination)
 
     match = re.search(r"\bto\s+([A-Za-z][A-Za-z\s\-]{1,50})", user_input, re.IGNORECASE)
     if not match:
@@ -71,7 +89,8 @@ def _extract_destination(user_input: str) -> str:
         idx = destination.lower().find(stop_word)
         if idx != -1:
             destination = destination[:idx].strip()
-    return destination or "your destination"
+    destination = destination or "your destination"
+    return _normalize_destination_name(destination)
 
 
 def _extract_days(user_input: str) -> int:

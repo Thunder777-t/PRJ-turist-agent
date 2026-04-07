@@ -22,6 +22,15 @@ from .deps import get_current_user
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
+def _normalize_destination_name(destination: str) -> str:
+    text = destination.strip().replace("中国", "").strip()
+    for suffix in ["回族自治区", "维吾尔自治区", "壮族自治区", "自治区", "特别行政区", "省", "市"]:
+        if text.endswith(suffix) and len(text) > len(suffix):
+            text = text[: -len(suffix)].strip()
+            break
+    return text or destination.strip()
+
+
 def _conversation_payload(conversation) -> dict:
     return {
         "id": conversation.id,
@@ -190,7 +199,7 @@ def _extract_destination_from_text(text: str) -> str:
     if cn_match:
         destination_cn = cn_match.group(1).strip(" ，。,.")
         if destination_cn:
-            return destination_cn
+            return _normalize_destination_name(destination_cn)
 
     match = re.search(r"\bto\s+([A-Za-z][A-Za-z\s\-]{1,60})", text, re.IGNORECASE)
     if not match:
@@ -200,7 +209,7 @@ def _extract_destination_from_text(text: str) -> str:
         idx = destination.lower().find(stop_word)
         if idx != -1:
             destination = destination[:idx].strip()
-    return destination or "Unknown"
+    return _normalize_destination_name(destination or "Unknown")
 
 
 def _build_user_preference_payload(current_user: User) -> dict:

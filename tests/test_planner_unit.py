@@ -20,6 +20,10 @@ class PlannerFallbackTests(unittest.TestCase):
         days = planner._extract_days("我想要去成都旅游7天")
         self.assertEqual(days, 7)
 
+    def test_extract_destination_chinese_with_country_prefix(self) -> None:
+        destination = planner._extract_destination("我想去中国甘肃旅游有哪些好玩的")
+        self.assertEqual(destination, "甘肃")
+
     def test_fallback_plan_structure(self) -> None:
         plan = planner._fallback_plan("I want a 2-day trip to Kyoto.")
         self.assertGreaterEqual(len(plan.steps), 6)

@@ -44,6 +44,13 @@ class GraphRoutingTests(unittest.TestCase):
         self.assertEqual(graph._extract_destination(text), "成都")
         self.assertEqual(graph._extract_days(text), 7)
 
+    def test_attraction_intent_uses_discovery_fallback_plan(self) -> None:
+        text = "我想去中国甘肃旅游有哪些好玩的"
+        steps = graph._fallback_plan_for_graph(text)
+        self.assertTrue(graph._is_attraction_intent(text))
+        self.assertTrue(any("Summarize 5-8 must-visit highlights" in step for step in steps))
+        self.assertFalse(any("3-day itinerary" in step for step in steps))
+
 
 if __name__ == "__main__":
     unittest.main()

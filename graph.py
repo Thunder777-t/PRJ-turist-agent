@@ -66,6 +66,89 @@ CHINESE_NUM_MAP = {
     "十": 10,
 }
 
+CURATED_CN_ATTRACTIONS = {
+    "甘肃": [
+        "敦煌莫高窟",
+        "鸣沙山月牙泉",
+        "嘉峪关关城",
+        "张掖七彩丹霞",
+        "麦积山石窟",
+        "扎尕那",
+        "甘南拉卜楞寺",
+        "黄河石林",
+    ],
+    "成都": [
+        "成都大熊猫繁育研究基地",
+        "都江堰",
+        "青城山",
+        "宽窄巷子",
+        "锦里古街",
+        "武侯祠",
+    ],
+}
+
+CURATED_CN_ATTRACTION_REASONS = {
+    "甘肃": {
+        "敦煌莫高窟": "世界文化遗产，壁画与彩塑艺术价值极高。",
+        "鸣沙山月牙泉": "沙漠奇观与绿洲同框，日落景色非常出片。",
+        "嘉峪关关城": "明长城西端核心关隘，历史感强。",
+        "张掖七彩丹霞": "丹霞地貌色彩层次丰富，适合摄影。",
+        "麦积山石窟": "石窟雕塑精美，兼具人文与自然景观。",
+        "扎尕那": "山地村落与草甸风光结合，徒步体验好。",
+        "甘南拉卜楞寺": "藏传文化氛围浓厚，转经长廊有代表性。",
+        "黄河石林": "黄河峡谷与石林地貌结合，地貌独特。",
+    }
+}
+
+CN_STOPWORDS = {
+    "旅游",
+    "旅行",
+    "景点",
+    "好玩",
+    "有哪些",
+    "推荐",
+    "地方",
+    "线路",
+    "攻略",
+    "中国",
+}
+
+
+def _contains_chinese(text: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", text))
+
+
+def _normalize_destination_name(destination: str) -> str:
+    text = destination.strip().replace("中国", "").strip()
+    suffixes = [
+        "回族自治区",
+        "维吾尔自治区",
+        "壮族自治区",
+        "自治区",
+        "特别行政区",
+        "省",
+        "市",
+    ]
+    for suffix in suffixes:
+        if text.endswith(suffix) and len(text) > len(suffix):
+            text = text[: -len(suffix)].strip()
+            break
+    return text or destination.strip()
+
+
+def _extract_chinese_location(text: str) -> str:
+    matches = re.findall(r"(?:中国)?([\u4e00-\u9fff]{2,12}(?:省|市|自治区|特别行政区)?)", text)
+    for raw in matches:
+        candidate = _normalize_destination_name(raw)
+        if candidate and candidate not in CN_STOPWORDS:
+            return candidate
+    return ""
+
+
+def _is_attraction_intent(text: str) -> bool:
+    if _contains_keyword(text, ["attractions", "things to do", "must see", "sightseeing"]):
+        return True
+    return bool(re.search(r"(好玩|景点|推荐|必去|打卡|玩什么|哪里玩)", text))
 
 def _parse_simple_chinese_number(text: str) -> int | None:
     if not text:
@@ -122,7 +205,11 @@ def _extract_destination(user_input: str) -> str:
     if cn_match:
         destination = cn_match.group(1).strip(" ，。,.")
         if destination:
-            return destination
+            return _normalize_destination_name(destination)
+
+    location = _extract_chinese_location(user_input)
+    if location:
+        return location
 
     match = re.search(r"\bto\s+([A-Za-z][A-Za-z\s\-]{1,50})", user_input, re.IGNORECASE)
     if not match:
@@ -133,7 +220,7 @@ def _extract_destination(user_input: str) -> str:
         idx = destination.lower().find(stop_word)
         if idx != -1:
             destination = destination[:idx].strip()
-    return destination
+    return _normalize_destination_name(destination)
 
 
 def _extract_days(text: str) -> int:
@@ -178,6 +265,58 @@ def search_places(query: str) -> Dict[str, Any]:
             query.strip(),
             flags=re.IGNORECASE,
         )
+        destination = _extract_destination(cleaned_query) or _extract_chinese_location(cleaned_query)
+        destination_key = _normalize_destination_name(destination) if destination else ""
+
+        if _contains_chinese(cleaned_query) or destination_key:
+            attractions: List[str] = []
+            snippets: List[str] = []
+            seen = set()
+
+            for item in CURATED_CN_ATTRACTIONS.get(destination_key, []):
+                key = item.strip().lower()
+                if key and key not in seen:
+                    attractions.append(item)
+                    snippets.append(f"精选推荐：{item}")
+                    seen.add(key)
+
+            cn_queries = []
+            if destination_key:
+                cn_queries.extend(
+                    [
+                        f"{destination_key} 旅游景点",
+                        f"{destination_key} 必去景点",
+                    ]
+                )
+            cn_queries.append(cleaned_query)
+
+            for q in cn_queries:
+                try:
+                    osm_results = _nominatim_search(q, limit=6)
+                except Exception:
+                    osm_results = []
+                for item in osm_results:
+                    name = (item.get("name") or item.get("display_name", "").split(",")[0]).strip()
+                    if not name:
+                        continue
+                    key = name.lower()
+                    if key in seen:
+                        continue
+                    attractions.append(name)
+                    snippets.append(item.get("display_name", ""))
+                    seen.add(key)
+                    if len(attractions) >= 10:
+                        break
+                if len(attractions) >= 10:
+                    break
+
+            return {
+                "query": cleaned_query,
+                "attractions": attractions[:10],
+                "snippets": snippets[:10],
+                "source": "Curated + OpenStreetMap Nominatim",
+            }
+
         data = _http_get_json(
             "https://en.wikipedia.org/w/api.php",
             {
@@ -185,7 +324,7 @@ def search_places(query: str) -> Dict[str, Any]:
                 "list": "search",
                 "srsearch": cleaned_query,
                 "format": "json",
-                "srlimit": 5,
+                "srlimit": 8,
                 "utf8": 1,
             },
         )
@@ -194,8 +333,8 @@ def search_places(query: str) -> Dict[str, Any]:
         snippets = [re.sub(r"<.*?>", "", item.get("snippet", "")) for item in raw_results]
         return {
             "query": cleaned_query,
-            "attractions": attractions,
-            "snippets": snippets,
+            "attractions": attractions[:8],
+            "snippets": snippets[:8],
             "source": "Wikipedia API",
         }
     except Exception as e:
@@ -479,6 +618,17 @@ def _score_confidence(status: str, verification: Dict[str, Any], tool_output: Di
 def _fallback_plan_for_graph(user_input: str) -> List[str]:
     destination = _extract_destination(user_input) or "your destination"
     days = _extract_days(user_input)
+
+    if _is_attraction_intent(user_input):
+        return [
+            f"Search iconic attractions and natural landscapes in {destination}.",
+            f"Search cultural and historical sites in {destination}.",
+            f"Search local food streets and signature cuisine spots in {destination}.",
+            f"Check weather and best visiting season in {destination}.",
+            f"Verify opening hours and ticket information for top attractions in {destination}.",
+            f"Summarize 5-8 must-visit highlights in {destination} with short reasons.",
+        ]
+
     return [
         f"Search top attractions in {destination}.",
         f"Find accommodation options in {destination}.",
@@ -498,6 +648,7 @@ def _normalize_plan_steps(steps: List[str], user_input: str) -> List[str]:
         line = step
         if destination:
             line = re.sub(r"\bdestination\b", destination, line, flags=re.IGNORECASE)
+            line = re.sub(r"\bCity\s*X\b", destination, line, flags=re.IGNORECASE)
         line = re.sub(r"\b\d+\s*-\s*day\b|\b\d+\s*days?\b", f"{days}-day", line, flags=re.IGNORECASE)
         normalized.append(line)
 
@@ -553,6 +704,11 @@ def plan_node(state: PlanExecuteState) -> Dict[str, Any]:
     user_input = state.get("input", "")
     destination = _extract_destination(user_input)
     days = _extract_days(user_input)
+
+    # For attraction-discovery intent, deterministic local planning gives more stable quality.
+    if destination and _is_attraction_intent(user_input):
+        return {"plan": _fallback_plan_for_graph(user_input)}
+
     objective = _build_objective_with_preferences(user_input, preferences)
     if destination:
         objective += (
@@ -652,6 +808,53 @@ def _summarize_tool_output(output: Dict[str, Any]) -> str:
     return json.dumps(output)[:200]
 
 
+def _dedupe_keep_order(items: List[str]) -> List[str]:
+    seen = set()
+    out: List[str] = []
+    for item in items:
+        key = item.strip().lower()
+        if not key or key in seen:
+            continue
+        out.append(item.strip())
+        seen.add(key)
+    return out
+
+
+def _collect_recommendations(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    attractions: List[str] = []
+    hotels: List[str] = []
+    weather_line = ""
+    budget_line = ""
+
+    for item in results:
+        output = item.get("output", {})
+        for name in output.get("attractions", []):
+            if isinstance(name, str):
+                attractions.append(name)
+        for hotel in output.get("hotels", []):
+            if isinstance(hotel, dict):
+                hotel_name = str(hotel.get("name", "")).strip()
+                if hotel_name:
+                    hotels.append(hotel_name)
+        if not weather_line and output.get("weather"):
+            weather_line = f"{output.get('location', '')}：{output.get('weather')}，约 {output.get('temperature_c')}°C"
+        if not budget_line and output.get("estimated_total"):
+            budget_line = f"预算估算：约 {output.get('estimated_total')} {output.get('currency', 'USD')}"
+
+    return {
+        "attractions": _dedupe_keep_order(attractions)[:8],
+        "hotels": _dedupe_keep_order(hotels)[:5],
+        "weather": weather_line,
+        "budget": budget_line,
+    }
+
+
+def _attraction_reason(destination: str, attraction: str) -> str:
+    dest_key = _normalize_destination_name(destination)
+    reason_map = CURATED_CN_ATTRACTION_REASONS.get(dest_key, {})
+    return reason_map.get(attraction, "")
+
+
 def _write_execution_log(results: List[Dict[str, Any]]) -> str:
     logs_dir = Path("logs")
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -670,12 +873,46 @@ def finalize_node(state: PlanExecuteState) -> Dict[str, str]:
     if not results:
         return {"response": "No itinerary could be produced."}
 
-    lines: List[str] = ["Final itinerary draft (Plan-and-Execute):"]
+    user_input = state.get("input", "")
+    destination = _extract_destination(user_input) or "目的地"
+    rec = _collect_recommendations(results)
+
+    lines: List[str] = [f"旅行建议（{destination}）"]
     pref_summary = _compact_preference_text(state.get("user_preferences", {}))
     if pref_summary:
-        lines.append(f"Personalization profile applied: {pref_summary}")
-        lines.append("")
+        lines.append(f"已应用个性化偏好：{pref_summary}")
 
+    if rec["attractions"]:
+        lines.append("\n值得去的地方：")
+        for idx, name in enumerate(rec["attractions"], 1):
+            reason = _attraction_reason(destination, name)
+            if reason:
+                lines.append(f"{idx}. {name} - {reason}")
+            else:
+                lines.append(f"{idx}. {name}")
+    else:
+        lines.append("\n暂未检索到稳定景点名单，建议补充“出行月份/偏好（自然风光或人文）”后重试。")
+
+    if rec["weather"]:
+        lines.append(f"\n天气参考：{rec['weather']}")
+    if rec["budget"] and not _is_attraction_intent(user_input):
+        lines.append(rec["budget"])
+    if rec["hotels"] and not _is_attraction_intent(user_input):
+        lines.append("住宿参考：" + "、".join(rec["hotels"][:3]))
+
+    if _is_attraction_intent(user_input):
+        lines.append("\n玩法建议：")
+        lines.append("1. 可先走河西走廊线：兰州/张掖/嘉峪关/敦煌，线路成熟。")
+        lines.append("2. 莫高窟、鸣沙山等热门点建议提前预约门票。")
+        lines.append("3. 甘肃南北温差较大，跨城行程建议预留机动时间。")
+        try:
+            log_path = _write_execution_log(results)
+            lines.append(f"\n调试日志已保存：{log_path}")
+        except Exception as e:
+            lines.append(f"\n执行日志保存失败：{e}")
+        return {"response": "\n".join(lines)}
+
+    lines.append("\n执行摘要：")
     for item in results:
         lines.append(f"{item['step_id']}. {item['step']}")
         lines.append(
@@ -690,13 +927,11 @@ def finalize_node(state: PlanExecuteState) -> Dict[str, str]:
                 f"unverified {verification.get('unverified_count', 0)}"
             )
 
-    lines.append("\nExecution trace (JSON):")
-    lines.append(json.dumps(results, ensure_ascii=True, indent=2))
     try:
         log_path = _write_execution_log(results)
-        lines.append(f"\nExecution log saved to: {log_path}")
+        lines.append(f"\n完整执行日志已保存：{log_path}")
     except Exception as e:
-        lines.append(f"\nExecution log write failed: {e}")
+        lines.append(f"\n执行日志保存失败：{e}")
 
     return {"response": "\n".join(lines)}
 
