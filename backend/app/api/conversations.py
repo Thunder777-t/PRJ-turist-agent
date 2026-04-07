@@ -9,12 +9,27 @@ from sqlalchemy.orm import Session
 from .. import crud
 from ..database import get_db
 from ..models import User
-from ..schemas import ChatResponse, ConversationCreateRequest, MessageCreateRequest
+from ..schemas import (
+    ChatResponse,
+    ConversationCreateRequest,
+    ConversationPatchRequest,
+    MessageCreateRequest,
+)
 from ..services.assistant_service import generate_assistant_reply, stream_assistant_events
 from .deps import get_current_user
 
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
+
+
+def _conversation_payload(conversation) -> dict:
+    return {
+        "id": conversation.id,
+        "title": conversation.title,
+        "is_archived": conversation.is_archived,
+        "created_at": conversation.created_at,
+        "updated_at": conversation.updated_at,
+    }
 
 
 @router.post("")
@@ -24,36 +39,25 @@ def create_conversation(
     db: Session = Depends(get_db),
 ):
     conversation = crud.create_conversation(db, user_id=current_user.id, title=payload.title)
-    return {
-        "success": True,
-        "data": {
-            "id": conversation.id,
-            "title": conversation.title,
-            "is_archived": conversation.is_archived,
-            "created_at": conversation.created_at,
-            "updated_at": conversation.updated_at,
-        },
-        "error": None,
-    }
+    return {"success": True, "data": _conversation_payload(conversation), "error": None}
 
 
 @router.get("")
 def list_conversations(
     limit: int = Query(default=20, ge=1, le=100),
+    include_archived: bool = Query(default=False),
+    q: str | None = Query(default=None, min_length=1, max_length=200),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    items = crud.list_user_conversations(db, user_id=current_user.id, limit=limit)
-    data = [
-        {
-            "id": item.id,
-            "title": item.title,
-            "is_archived": item.is_archived,
-            "created_at": item.created_at,
-            "updated_at": item.updated_at,
-        }
-        for item in items
-    ]
+    items = crud.list_user_conversations(
+        db,
+        user_id=current_user.id,
+        limit=limit,
+        include_archived=include_archived,
+        query=q.strip() if q else None,
+    )
+    data = [_conversation_payload(item) for item in items]
     return {"success": True, "data": data, "error": None}
 
 
@@ -69,17 +73,30 @@ def get_conversation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found.",
         )
-    return {
-        "success": True,
-        "data": {
-            "id": conversation.id,
-            "title": conversation.title,
-            "is_archived": conversation.is_archived,
-            "created_at": conversation.created_at,
-            "updated_at": conversation.updated_at,
-        },
-        "error": None,
-    }
+    return {"success": True, "data": _conversation_payload(conversation), "error": None}
+
+
+@router.patch("/{conversation_id}")
+def patch_conversation(
+    conversation_id: str,
+    payload: ConversationPatchRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conversation = crud.get_user_conversation(db, user_id=current_user.id, conversation_id=conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found.",
+        )
+
+    updated = crud.update_conversation(
+        db=db,
+        conversation=conversation,
+        title=payload.title,
+        is_archived=payload.is_archived,
+    )
+    return {"success": True, "data": _conversation_payload(updated), "error": None}
 
 
 @router.get("/{conversation_id}/messages")

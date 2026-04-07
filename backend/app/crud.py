@@ -107,13 +107,21 @@ def create_conversation(db: Session, user_id: str, title: str) -> models.Convers
     return conversation
 
 
-def list_user_conversations(db: Session, user_id: str, limit: int = 20) -> list[models.Conversation]:
-    stmt = (
-        select(models.Conversation)
-        .where(models.Conversation.user_id == user_id)
-        .order_by(models.Conversation.updated_at.desc())
-        .limit(limit)
-    )
+def list_user_conversations(
+    db: Session,
+    user_id: str,
+    limit: int = 20,
+    include_archived: bool = False,
+    query: str | None = None,
+) -> list[models.Conversation]:
+    stmt = select(models.Conversation).where(models.Conversation.user_id == user_id)
+
+    if not include_archived:
+        stmt = stmt.where(models.Conversation.is_archived.is_(False))
+    if query:
+        stmt = stmt.where(models.Conversation.title.ilike(f"%{query}%"))
+
+    stmt = stmt.order_by(models.Conversation.updated_at.desc()).limit(limit)
     return list(db.scalars(stmt).all())
 
 
@@ -126,6 +134,21 @@ def get_user_conversation(
         .where(models.Conversation.user_id == user_id)
     )
     return db.scalar(stmt)
+
+
+def update_conversation(
+    db: Session,
+    conversation: models.Conversation,
+    title: str | None = None,
+    is_archived: bool | None = None,
+) -> models.Conversation:
+    if title is not None:
+        conversation.title = title
+    if is_archived is not None:
+        conversation.is_archived = is_archived
+    db.commit()
+    db.refresh(conversation)
+    return conversation
 
 
 def create_message(

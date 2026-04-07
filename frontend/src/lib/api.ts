@@ -120,8 +120,18 @@ export async function getMe(auth: AuthContext): Promise<User> {
   return parseEnvelope<User>(response);
 }
 
-export async function listConversations(auth: AuthContext): Promise<Conversation[]> {
-  const response = await authorizedFetch("/conversations?limit=100", { method: "GET" }, auth);
+export async function listConversations(
+  auth: AuthContext,
+  options?: { includeArchived?: boolean; q?: string },
+): Promise<Conversation[]> {
+  const params = new URLSearchParams({ limit: "100" });
+  if (options?.includeArchived) {
+    params.set("include_archived", "true");
+  }
+  if (options?.q?.trim()) {
+    params.set("q", options.q.trim());
+  }
+  const response = await authorizedFetch(`/conversations?${params.toString()}`, { method: "GET" }, auth);
   return parseEnvelope<Conversation[]>(response);
 }
 
@@ -131,6 +141,22 @@ export async function createConversation(title: string, auth: AuthContext): Prom
     {
       method: "POST",
       body: JSON.stringify({ title }),
+    },
+    auth,
+  );
+  return parseEnvelope<Conversation>(response);
+}
+
+export async function patchConversation(
+  conversationId: string,
+  payload: { title?: string; is_archived?: boolean },
+  auth: AuthContext,
+): Promise<Conversation> {
+  const response = await authorizedFetch(
+    `/conversations/${conversationId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
     },
     auth,
   );

@@ -10,6 +10,7 @@ import {
   listMessages,
   login,
   logout,
+  patchConversation,
   patchPreferences,
   register,
   setStoredAuth,
@@ -95,6 +96,11 @@ export default function App() {
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [conversationQuery, setConversationQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [conversationBusyId, setConversationBusyId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
@@ -123,6 +129,11 @@ export default function App() {
     setUser(null);
     setConversations([]);
     setSelectedConversationId(null);
+    setConversationQuery("");
+    setShowArchived(false);
+    setRenamingConversationId(null);
+    setRenameDraft("");
+    setConversationBusyId(null);
     setMessages([]);
     setPreferences(null);
     setPreferenceForm(DEFAULT_PREFERENCE_FORM);
@@ -153,23 +164,12 @@ export default function App() {
     const loadUserAndConversations = async () => {
       try {
         const auth = getAuthContext(tokens);
-        const [me, list, pref] = await Promise.all([
-          getMe(auth),
-          listConversations(auth),
-          getPreferences(auth),
-        ]);
+        const [me, pref] = await Promise.all([getMe(auth), getPreferences(auth)]);
         if (cancelled) {
           return;
         }
 
         setUser(me);
-        setConversations(list);
-        setSelectedConversationId((current) => {
-          if (current && list.some((item) => item.id === current)) {
-            return current;
-          }
-          return list[0]?.id ?? null;
-        });
         setPreferences(pref);
         setPreferenceForm(toPreferenceForm(pref));
       } catch (error) {
@@ -186,6 +186,44 @@ export default function App() {
       cancelled = true;
     };
   }, [tokens]);
+
+  useEffect(() => {
+    if (!tokens) {
+      setConversations([]);
+      setSelectedConversationId(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadConversations = async () => {
+      try {
+        const auth = getAuthContext(tokens);
+        const list = await listConversations(auth, {
+          includeArchived: showArchived,
+          q: conversationQuery,
+        });
+        if (cancelled) {
+          return;
+        }
+        setConversations(list);
+        setSelectedConversationId((current) => {
+          if (current && list.some((item) => item.id === current)) {
+            return current;
+          }
+          return list[0]?.id ?? null;
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setChatError(error instanceof Error ? error.message : "Failed to load conversations.");
+        }
+      }
+    };
+
+    loadConversations();
+    return () => {
+      cancelled = true;
+    };
+  }, [tokens, showArchived, conversationQuery]);
 
   useEffect(() => {
     if (!tokens || !selectedConversationId) {
@@ -240,10 +278,64 @@ export default function App() {
 
     try {
       const created = await createConversation("New travel chat", getAuthContext(tokens));
-      setConversations((prev) => [created, ...prev]);
+      setConversationQuery("");
+      setShowArchived(false);
+      setConversations((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
       setSelectedConversationId(created.id);
     } catch (error) {
       setChatError(error instanceof Error ? error.message : "Failed to create conversation.");
+    }
+  };
+
+  const handleStartRename = (conversation: Conversation) => {
+    setRenamingConversationId(conversation.id);
+    setRenameDraft(conversation.title);
+  };
+
+  const handleRenameConversation = async (conversationId: string) => {
+    if (!tokens || !renameDraft.trim()) {
+      return;
+    }
+    setConversationBusyId(conversationId);
+    setChatError(null);
+    try {
+      const updated = await patchConversation(
+        conversationId,
+        { title: renameDraft.trim() },
+        getAuthContext(tokens),
+      );
+      setConversations((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setRenamingConversationId(null);
+      setRenameDraft("");
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Failed to rename conversation.");
+    } finally {
+      setConversationBusyId(null);
+    }
+  };
+
+  const handleArchiveConversation = async (conversation: Conversation, nextArchived: boolean) => {
+    if (!tokens) {
+      return;
+    }
+    setConversationBusyId(conversation.id);
+    setChatError(null);
+    try {
+      const updated = await patchConversation(
+        conversation.id,
+        { is_archived: nextArchived },
+        getAuthContext(tokens),
+      );
+      if (!showArchived && updated.is_archived) {
+        setConversations((prev) => prev.filter((item) => item.id !== updated.id));
+        setSelectedConversationId((current) => (current === updated.id ? null : current));
+      } else {
+        setConversations((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      }
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Failed to update archive status.");
+    } finally {
+      setConversationBusyId(null);
     }
   };
 
@@ -396,7 +488,10 @@ export default function App() {
 
       const [latestMessages, latestConversations] = await Promise.all([
         listMessages(conversationId, getAuthContext(tokens)),
-        listConversations(getAuthContext(tokens)),
+        listConversations(getAuthContext(tokens), {
+          includeArchived: showArchived,
+          q: conversationQuery,
+        }),
       ]);
       setMessages(latestMessages);
       setConversations(latestConversations);
@@ -505,16 +600,81 @@ export default function App() {
           Preferences
         </button>
 
+        <div className="conversation-toolbar">
+          <input
+            value={conversationQuery}
+            onChange={(event) => setConversationQuery(event.target.value)}
+            placeholder="Search chats..."
+          />
+          <label htmlFor="show-archived">
+            <input
+              id="show-archived"
+              type="checkbox"
+              checked={showArchived}
+              onChange={(event) => setShowArchived(event.target.checked)}
+            />
+            Show archived
+          </label>
+        </div>
+
         <div className="conversation-list">
           {conversations.map((conversation) => (
-            <button
-              key={conversation.id}
-              className={`conversation-item ${conversation.id === selectedConversationId ? "active" : ""}`}
-              type="button"
-              onClick={() => setSelectedConversationId(conversation.id)}
-            >
-              <span>{conversation.title}</span>
-            </button>
+            <div key={conversation.id} className="conversation-row">
+              <button
+                className={`conversation-item ${conversation.id === selectedConversationId ? "active" : ""}`}
+                type="button"
+                onClick={() => setSelectedConversationId(conversation.id)}
+              >
+                <span>{conversation.title}</span>
+              </button>
+
+              <div className="conversation-actions">
+                <button
+                  type="button"
+                  className="mini-btn"
+                  onClick={() => handleStartRename(conversation)}
+                  disabled={conversationBusyId === conversation.id}
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  className="mini-btn"
+                  onClick={() => handleArchiveConversation(conversation, !conversation.is_archived)}
+                  disabled={conversationBusyId === conversation.id}
+                >
+                  {conversation.is_archived ? "Unarchive" : "Archive"}
+                </button>
+              </div>
+
+              {renamingConversationId === conversation.id ? (
+                <div className="rename-inline">
+                  <input
+                    value={renameDraft}
+                    onChange={(event) => setRenameDraft(event.target.value)}
+                    placeholder="New title"
+                  />
+                  <button
+                    className="mini-btn"
+                    type="button"
+                    onClick={() => handleRenameConversation(conversation.id)}
+                    disabled={conversationBusyId === conversation.id}
+                  >
+                    Save
+                  </button>
+                  <button
+                    className="mini-btn"
+                    type="button"
+                    onClick={() => {
+                      setRenamingConversationId(null);
+                      setRenameDraft("");
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : null}
+            </div>
           ))}
           {!conversations.length ? <p className="empty-note">No conversation yet.</p> : null}
         </div>

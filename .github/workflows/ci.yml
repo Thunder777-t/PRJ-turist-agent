@@ -30,6 +30,7 @@ jobs:
           python -m unittest backend/tests/test_m5_security.py
           python -m unittest backend/tests/test_m7_profile_api.py
           python -m unittest backend/tests/test_m8_personalization.py
+          python -m unittest backend/tests/test_m9_conversation_management.py
 
   frontend-build:
     runs-on: ubuntu-latest

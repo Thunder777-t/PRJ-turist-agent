@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 class RegisterRequest(BaseModel):
@@ -47,6 +47,17 @@ class ConversationResponse(BaseModel):
     is_archived: bool
     created_at: datetime
     updated_at: datetime
+
+
+class ConversationPatchRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    is_archived: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_non_empty_patch(self) -> "ConversationPatchRequest":
+        if self.title is None and self.is_archived is None:
+            raise ValueError("At least one field must be provided.")
+        return self
 
 
 class MessageCreateRequest(BaseModel):

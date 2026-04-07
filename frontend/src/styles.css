@@ -225,6 +225,29 @@ button.ghost {
   overflow-y: auto;
 }
 
+.conversation-toolbar {
+  display: grid;
+  gap: 8px;
+}
+
+.conversation-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--soft-ink);
+  font-size: 0.82rem;
+}
+
+.conversation-toolbar input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.conversation-row {
+  display: grid;
+  gap: 6px;
+}
+
 .conversation-item {
   text-align: left;
   background: #ffffffcc;
@@ -245,6 +268,32 @@ button.ghost {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.conversation-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.mini-btn {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffffc4;
+  padding: 6px 8px;
+  font-size: 0.76rem;
+  cursor: pointer;
+  color: var(--soft-ink);
+}
+
+.mini-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.rename-inline {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
 }
 
 .empty-note {
