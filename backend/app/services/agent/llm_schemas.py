@@ -342,60 +342,60 @@ def _build_markdown_from_frontend(
 
     if language == "zh":
         lines: list[str] = []
-        lines.append("### ???????")
+        lines.append("### 我理解你的需求")
         if user_input:
-            lines.append(f"- ?????{user_input}")
-        lines.append(f"- ????{destination or '???'}")
-        lines.append(f"- ?????{duration_days if duration_days > 0 else '???'}")
+            lines.append(f"- 原始请求：{user_input}")
+        lines.append(f"- 目的地：{destination or '待确认'}")
+        lines.append(f"- 行程时长：{duration_days if duration_days > 0 else '待确认'}天")
         lines.append("")
 
         if assumptions:
-            lines.append("### ???????????")
+            lines.append("### 我基于以下假设生成方案")
             for item in assumptions[:8]:
                 lines.append(f"- {item}")
             lines.append("")
 
         if missing_information:
-            lines.append("### ???????")
+            lines.append("### 仍需补充信息")
             for item in missing_information[:8]:
                 lines.append(f"- {item}")
             lines.append("")
 
         if has_itinerary:
             title_days = duration_days if duration_days > 0 else len(itinerary)
-            lines.append(f"### {destination or '???'}{title_days}?????")
+            lines.append(f"### {destination or '目的地'}{title_days}天行程（初版）")
             for day_row in itinerary:
                 if not isinstance(day_row, dict):
                     continue
                 day = _extract_int(day_row.get("day"), 0)
-                theme = _norm_text(day_row.get("theme")) or f"Day {day if day > 0 else '?'}"
+                theme = _norm_text(day_row.get("theme")) or f"第{day if day > 0 else '?'}天"
                 morning = _norm_text(day_row.get("morning"))
                 afternoon = _norm_text(day_row.get("afternoon"))
                 evening = _norm_text(day_row.get("evening"))
                 food = _to_list_of_strings(day_row.get("food_recommendations"))
                 transport = _to_list_of_strings(day_row.get("transport_notes"))
                 why = _norm_text(day_row.get("why_this_day_works"))
-                lines.append(f"- **Day {day if day > 0 else '?'}?{theme}**")
+                lines.append(f"- **Day {day if day > 0 else '?'}：{theme}**")
                 if morning:
-                    lines.append(f"  - **??**?{morning}")
+                    lines.append(f"  - **上午：**{morning}")
                 if afternoon:
-                    lines.append(f"  - **??**?{afternoon}")
+                    lines.append(f"  - **下午：**{afternoon}")
                 if evening:
-                    lines.append(f"  - **??**?{evening}")
+                    lines.append(f"  - **晚上：**{evening}")
                 if food:
-                    lines.append(f"  - **??**?{'?'.join(food[:4])}")
+                    lines.append(f"  - **美食：**{'；'.join(food[:4])}")
                 if transport:
-                    lines.append(f"  - **??**?{'?'.join(transport[:4])}")
+                    lines.append(f"  - **交通：**{'；'.join(transport[:4])}")
                 if why:
-                    lines.append(f"  - **????**?{why}")
+                    lines.append(f"  - **安排理由：**{why}")
             lines.append("")
         else:
-            lines.append("?????????????????????????????")
+            lines.append("当前尚未返回可靠的分日行程数据，我不会用模板强行生成结果。")
             lines.append("")
 
         if isinstance(budget, dict) and budget:
-            lines.append("### ????")
-            lines.append("| ?? | ???? |")
+            lines.append("### 预算粗估")
+            lines.append("| 项目 | 预算参考 |")
             lines.append("|---|---|")
             for key, value in list(budget.items())[:12]:
                 k = _norm_text(key)
@@ -405,7 +405,7 @@ def _build_markdown_from_frontend(
             lines.append("")
 
         if isinstance(hotel_areas, list) and hotel_areas:
-            lines.append("### ??????")
+            lines.append("### 住宿区域建议")
             for item in hotel_areas[:4]:
                 if not isinstance(item, dict):
                     continue
@@ -416,21 +416,21 @@ def _build_markdown_from_frontend(
                 if area:
                     lines.append(f"- **{area}**")
                 if pros:
-                    lines.append(f"  - **??**?{'?'.join(pros[:3])}")
+                    lines.append(f"  - **优点：**{'；'.join(pros[:3])}")
                 if cons:
-                    lines.append(f"  - **??**?{'?'.join(cons[:3])}")
+                    lines.append(f"  - **缺点：**{'；'.join(cons[:3])}")
                 if fit:
-                    lines.append(f"  - **??**?{'?'.join(fit[:3])}")
+                    lines.append(f"  - **适合：**{'；'.join(fit[:3])}")
             lines.append("")
 
         if tips:
-            lines.append("### ????")
+            lines.append("### 实用建议")
             for item in tips[:6]:
                 lines.append(f"- {item}")
             lines.append("")
 
         if follow_up_questions:
-            lines.append("### ????????")
+            lines.append("### 你还可以补充以下信息，我会继续细化")
             for q in follow_up_questions[:2]:
                 lines.append(f"- {q}")
 

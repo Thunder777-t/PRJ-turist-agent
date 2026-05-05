@@ -136,7 +136,7 @@ def _final_max_tokens(complexity: str) -> int:
         "fast": 1200,
         "short": 1800,
         "medium": 2400,
-        "long": 3600,
+        "long": 3200,
     }
     configured = _safe_int(os.getenv("AGENT_FINAL_MAX_TOKENS"), defaults.get(complexity, 2000))
     return max(configured, defaults.get(complexity, 2000))
@@ -258,8 +258,10 @@ def _is_output_language_mismatch(frontend_json: dict[str, Any], markdown_answer:
     text_blob = f"{_collect_frontend_text_blob(frontend_json)}\n{str(markdown_answer or '')[:2000]}"
     cjk_count, latin_count = _language_stats(text_blob)
     if target_language == "en":
-        return cjk_count >= 6 and cjk_count > max(3, int(latin_count * 0.08))
-    return latin_count >= 70 and latin_count > max(40, cjk_count * 2)
+        # Do not over-trigger on proper nouns in Chinese.
+        return cjk_count >= 24 and cjk_count > max(15, int(latin_count * 0.35))
+    # Chinese output can contain many English place names/brands; keep threshold conservative.
+    return latin_count >= 220 and latin_count > max(160, int(cjk_count * 2.8))
 
 
 def _looks_placeholder_markdown(markdown_answer: str) -> bool:
@@ -289,8 +291,7 @@ def _rewrite_payload_language_if_needed(
     if not _is_output_language_mismatch(frontend_json, markdown_answer, target_language):
         return frontend_json, markdown_answer
     if not CLIENT.enabled:
-        fallback_markdown = _build_fast_markdown(frontend_json, user_input=user_input)
-        return frontend_json, fallback_markdown
+        return frontend_json, markdown_answer
 
     prompt = (
         "Rewrite the existing travel-plan payload into target response_language.\n"
@@ -334,20 +335,18 @@ def _rewrite_payload_language_if_needed(
         CLIENT.timeout_sec = timeout_backup
 
     if not result.get("ok"):
-        fallback_markdown = _build_fast_markdown(frontend_json, user_input=user_input)
-        return frontend_json, fallback_markdown
+        return frontend_json, markdown_answer
 
     payload = result.get("json", {})
     if not isinstance(payload, dict):
-        fallback_markdown = _build_fast_markdown(frontend_json, user_input=user_input)
-        return frontend_json, fallback_markdown
+        return frontend_json, markdown_answer
 
     new_frontend = payload.get("frontend_json", {})
     new_markdown = str(payload.get("markdown_answer", "")).strip()
     if not isinstance(new_frontend, dict):
         new_frontend = frontend_json
     if not new_markdown:
-        new_markdown = _build_fast_markdown(new_frontend, user_input=user_input)
+        new_markdown = markdown_answer
 
     return new_frontend, new_markdown
 
@@ -1346,6 +1345,7 @@ def _build_fast_payload(
     interpretation_payload: dict[str, Any],
     response_stage: str,
     llm_error: str | None = None,
+    allow_llm_enrichment: bool = True,
 ) -> dict[str, Any]:
     destination, duration_days, budget = _extract_destination_duration_budget(requirement_understanding)
     if not destination or duration_days <= 0 or not budget:
@@ -1417,7 +1417,7 @@ def _build_fast_payload(
         tool_results=tool_results,
         interpretation_payload=interpretation_payload,
     )
-    if final_days > 0 and evidence_digest:
+    if allow_llm_enrichment and final_days > 0 and evidence_digest:
         llm_places = _llm_select_place_candidates(
             user_input=user_input,
             destination=destination or "",
@@ -1428,14 +1428,15 @@ def _build_fast_payload(
             candidates = llm_places
     itinerary: list[dict[str, Any]] = []
     if final_days > 0 and destination:
-        itinerary = _llm_build_fallback_itinerary(
-            user_input=user_input,
-            destination=destination or "",
-            duration_days=final_days,
-            language=language,
-            candidates=candidates,
-            evidence_digest=evidence_digest,
-        )
+        if allow_llm_enrichment and CLIENT.enabled:
+            itinerary = _llm_build_fallback_itinerary(
+                user_input=user_input,
+                destination=destination or "",
+                duration_days=final_days,
+                language=language,
+                candidates=candidates,
+                evidence_digest=evidence_digest,
+            )
         # Never auto-fill with rigid templates when the LLM path fails.
         # If fallback LLM cannot produce reliable day plans, keep itinerary empty and surface uncertainty.
         if not itinerary and not CLIENT.enabled:
@@ -1492,6 +1493,7 @@ def _fallback_payload(
     time_context: dict[str, str],
     error_message: str | None = None,
     response_stage: str = "llm_fallback",
+    allow_llm_enrichment: bool = False,
 ) -> dict[str, Any]:
     payload = _build_fast_payload(
         user_input=user_input,
@@ -1501,6 +1503,7 @@ def _fallback_payload(
         interpretation_payload=interpretation_payload,
         response_stage=response_stage,
         llm_error=error_message,
+        allow_llm_enrichment=allow_llm_enrichment,
     )
     markdown = _prepend_time_anchor_if_needed(
         str(payload.get("markdown_answer", "")).strip(),
@@ -1563,6 +1566,7 @@ def _quick_final_rescue(
     search_plan: list[SearchTask],
     interpretation_payload: dict[str, Any],
     time_context: dict[str, str],
+    evidence_digest: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     if not CLIENT.enabled:
         return None
@@ -1577,7 +1581,8 @@ def _quick_final_rescue(
         }
         for task in search_plan[:4]
     ]
-    sources = _normalize_sources(interpretation_payload.get("sources", []))[:5]
+    sources = _normalize_sources(interpretation_payload.get("sources", []))[:6]
+    compact_evidence = list(evidence_digest or [])[:6]
 
     prompt = (
         "Build a valid final travel-plan JSON quickly.\n"
@@ -1588,6 +1593,7 @@ def _quick_final_rescue(
         f"time_context:\n{json.dumps(time_context, ensure_ascii=False)}\n\n"
         f"requirement_understanding:\n{json.dumps(requirement_understanding, ensure_ascii=False)}\n\n"
         f"search_tasks:\n{json.dumps(light_tasks, ensure_ascii=False)}\n\n"
+        f"evidence_digest:\n{json.dumps(compact_evidence, ensure_ascii=False)}\n\n"
         f"sources:\n{json.dumps(sources, ensure_ascii=False)}\n\n"
         "Output JSON only."
     )
@@ -1600,11 +1606,11 @@ def _quick_final_rescue(
 
     timeout_backup = CLIENT.timeout_sec
     try:
-        CLIENT.timeout_sec = _safe_float(os.getenv("AGENT_FINAL_RESCUE_TIMEOUT_SEC"), 18.0)
+        CLIENT.timeout_sec = _safe_float(os.getenv("AGENT_FINAL_RESCUE_TIMEOUT_SEC"), 26.0)
         result = CLIENT.json_completion(
             messages=messages,
             temperature=0.0,
-            max_tokens=_safe_int(os.getenv("AGENT_FINAL_RESCUE_MAX_TOKENS"), 2600),
+            max_tokens=_safe_int(os.getenv("AGENT_FINAL_RESCUE_MAX_TOKENS"), 3200),
             reasoning_effort=None,
             extra_body={"thinking": {"type": "disabled"}},
             model=(os.getenv("AGENT_FINAL_RESCUE_MODEL") or "").strip() or "deepseek-v4-flash",
@@ -2004,11 +2010,11 @@ def _markdown_rescue_max_tokens(duration_days: int) -> int:
     if env > 0:
         return env
     if duration_days >= 10:
-        return 3600
+        return 3200
     if duration_days >= 7:
-        return 3000
+        return 2600
     if duration_days >= 4:
-        return 2200
+        return 2000
     return 1600
 
 
@@ -2017,10 +2023,10 @@ def _markdown_rescue_timeout_sec(duration_days: int) -> float:
     if env > 0:
         return env
     if duration_days >= 10:
-        return 42.0
+        return 28.0
     if duration_days >= 7:
-        return 34.0
-    return 18.0
+        return 24.0
+    return 16.0
 
 
 def _merge_non_overlapping_markdown(base: str, continuation: str) -> str:
@@ -2302,10 +2308,20 @@ def generate_itinerary_payload(
         days_hint = days_text_hint
     complexity = _trip_complexity(days_hint, speed_mode)
     mocked_call = hasattr(CLIENT.json_completion, "assert_called")
+    compact_tool_results = _compact_tool_results_for_prompt(tool_results)
+    evidence_digest = _collect_evidence_digest(
+        search_plan=search_plan,
+        tool_results=tool_results,
+        interpretation_payload=interpretation_payload,
+    )
+    if not evidence_digest:
+        evidence_digest = compact_tool_results[:4]
 
     quick_first_raw = os.getenv("AGENT_ENABLE_QUICK_FINAL_FIRST")
     if quick_first_raw is None:
-        quick_first = complexity == "long"
+        # Default to main final-planner path first.
+        # Quick-rescue can be explicitly enabled by env flag when latency is prioritized.
+        quick_first = False
     else:
         quick_first = str(quick_first_raw).strip().lower() in {"1", "true", "yes", "on"}
     if quick_first and not mocked_call:
@@ -2315,6 +2331,7 @@ def generate_itinerary_payload(
             search_plan=search_plan,
             interpretation_payload=interpretation_payload,
             time_context=time_context,
+            evidence_digest=evidence_digest,
         )
         quick_frontend = quick_payload.get("frontend_json", {}) if isinstance(quick_payload, dict) else {}
         quick_itinerary = quick_frontend.get("itinerary", []) if isinstance(quick_frontend, dict) else []
@@ -2343,14 +2360,6 @@ def generate_itinerary_payload(
                 "response_stage": str(quick_payload.get("response_stage", "finalized_by_llm_quick")),
             }
 
-    compact_tool_results = _compact_tool_results_for_prompt(tool_results)
-    evidence_digest = _collect_evidence_digest(
-        search_plan=search_plan,
-        tool_results=tool_results,
-        interpretation_payload=interpretation_payload,
-    )
-    if not evidence_digest:
-        evidence_digest = compact_tool_results[:4]
     user_prompt = _build_final_user_prompt(
         user_input=user_input,
         requirement_understanding=requirement_understanding,
@@ -2373,7 +2382,8 @@ def generate_itinerary_payload(
     enable_retry = str(os.getenv("AGENT_FINAL_ENABLE_RETRY", "0")).strip().lower() in {"1", "true", "yes", "on"}
     skip_main_raw = os.getenv("AGENT_SKIP_MAIN_FINAL_LONG")
     if skip_main_raw is None:
-        skip_main_final = complexity == "long"
+        # Keep robust quality defaults: do not skip main final call unless explicitly configured.
+        skip_main_final = False
     else:
         skip_main_final = str(skip_main_raw).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -2447,6 +2457,7 @@ def generate_itinerary_payload(
                 interpretation_payload=interpretation_payload,
                 response_stage="llm_partial_autofill",
                 llm_error="Final LLM output missing structured itinerary fields.",
+                allow_llm_enrichment=False,
             )
             fallback_frontend = fallback.get("frontend_json", {})
             if isinstance(fallback_frontend, dict):
@@ -2461,6 +2472,7 @@ def generate_itinerary_payload(
                     search_plan=search_plan,
                     interpretation_payload=interpretation_payload,
                     time_context=time_context,
+                    evidence_digest=evidence_digest,
                 )
                 rescue_frontend = rescue_partial.get("frontend_json", {}) if isinstance(rescue_partial, dict) else {}
                 rescue_itinerary = rescue_frontend.get("itinerary", []) if isinstance(rescue_frontend, dict) else []
@@ -2533,17 +2545,17 @@ def generate_itinerary_payload(
             "response_stage": "finalized_by_llm",
         }
 
-    markdown_rescue = _markdown_rescue_payload(
+    rescue_after_main = _quick_final_rescue(
         user_input=user_input,
         requirement_understanding=requirement_understanding,
         search_plan=search_plan,
-        tool_results=tool_results,
         interpretation_payload=interpretation_payload,
         time_context=time_context,
+        evidence_digest=evidence_digest,
     )
-    if isinstance(markdown_rescue, dict):
-        rescue_frontend = markdown_rescue.get("frontend_json", {})
-        rescue_markdown = str(markdown_rescue.get("markdown_answer", "")).strip()
+    if isinstance(rescue_after_main, dict):
+        rescue_frontend = rescue_after_main.get("frontend_json", {})
+        rescue_markdown = str(rescue_after_main.get("markdown_answer", "")).strip()
         if isinstance(rescue_frontend, dict):
             rescue_frontend, rescue_markdown = _rewrite_payload_language_if_needed(
                 user_input=user_input,
@@ -2565,8 +2577,52 @@ def generate_itinerary_payload(
             "sources": _normalize_sources(interpretation_payload.get("sources", [])),
             "frontend_json": rescue_frontend,
             "markdown_answer": rescue_markdown,
-            "response_stage": str(markdown_rescue.get("response_stage", "finalized_by_markdown_rescue")),
+            "response_stage": str(rescue_after_main.get("response_stage", "finalized_by_llm_rescue")),
+            "llm_error": _truncate_text(last_error or "", 500),
         }
+
+    enable_markdown_rescue = str(os.getenv("AGENT_ENABLE_MARKDOWN_RESCUE", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if enable_markdown_rescue:
+        markdown_rescue = _markdown_rescue_payload(
+            user_input=user_input,
+            requirement_understanding=requirement_understanding,
+            search_plan=search_plan,
+            tool_results=tool_results,
+            interpretation_payload=interpretation_payload,
+            time_context=time_context,
+        )
+        if isinstance(markdown_rescue, dict):
+            rescue_frontend = markdown_rescue.get("frontend_json", {})
+            rescue_markdown = str(markdown_rescue.get("markdown_answer", "")).strip()
+            if isinstance(rescue_frontend, dict):
+                rescue_frontend, rescue_markdown = _rewrite_payload_language_if_needed(
+                    user_input=user_input,
+                    frontend_json=rescue_frontend,
+                    markdown_answer=rescue_markdown,
+                    time_context=time_context,
+                )
+                rescue_markdown = _prepend_time_anchor_if_needed(
+                    rescue_markdown,
+                    user_input=user_input,
+                    time_context=time_context,
+                )
+            return {
+                "requirement_understanding": requirement_understanding,
+                "search_tasks": [task.to_dict() for task in search_plan],
+                "search_plan": [task.to_dict() for task in search_plan],
+                "search_results": [result_item.to_dict() for result_item in tool_results],
+                "search_results_interpretation": interpretation_payload.get("task_result_interpretations", []),
+                "sources": _normalize_sources(interpretation_payload.get("sources", [])),
+                "frontend_json": rescue_frontend,
+                "markdown_answer": rescue_markdown,
+                "response_stage": str(markdown_rescue.get("response_stage", "finalized_by_markdown_rescue")),
+                "llm_error": _truncate_text(last_error or "", 500),
+            }
 
     enable_json_rescue = str(os.getenv("AGENT_ENABLE_JSON_RESCUE_AFTER_MARKDOWN", "0")).strip().lower() in {
         "1",
@@ -2581,6 +2637,7 @@ def generate_itinerary_payload(
             search_plan=search_plan,
             interpretation_payload=interpretation_payload,
             time_context=time_context,
+            evidence_digest=evidence_digest,
         )
         if isinstance(rescue_payload, dict):
             rescue_frontend = rescue_payload.get("frontend_json", {})
