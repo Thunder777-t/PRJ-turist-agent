@@ -56,9 +56,11 @@ def create_app() -> FastAPI:
             # For development bootstrap. In production we should rely on migrations.
             Base.metadata.create_all(bind=engine)
 
-    app.include_router(auth_router, prefix="/api/v1")
-    app.include_router(conversations_router, prefix="/api/v1")
-    app.include_router(profile_router, prefix="/api/v1")
+    # Keep /api/v1 as the primary public contract; /api/v4 is retained for backward compatibility.
+    for api_prefix in ("/api/v1", "/api/v4"):
+        app.include_router(auth_router, prefix=api_prefix)
+        app.include_router(conversations_router, prefix=api_prefix)
+        app.include_router(profile_router, prefix=api_prefix)
 
     @app.get("/health")
     def health():

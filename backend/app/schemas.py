@@ -63,6 +63,7 @@ class ConversationPatchRequest(BaseModel):
 class MessageCreateRequest(BaseModel):
     content: str = Field(min_length=1, max_length=8000)
     client_message_id: str | None = None
+    agent_speed_mode: str | None = Field(default=None, max_length=32)
 
 
 class MessageResponse(BaseModel):
@@ -76,6 +77,7 @@ class MessageResponse(BaseModel):
 class ChatRequest(BaseModel):
     content: str = Field(min_length=1, max_length=8000)
     client_message_id: str | None = None
+    agent_speed_mode: str | None = Field(default=None, max_length=32)
 
 
 class ChatResponse(BaseModel):

@@ -6,8 +6,27 @@ This folder now includes M2 + M3 backend implementation:
 - SQLite persistence with SQLAlchemy models
 - Alembic migration setup and first revision
 - User-isolated conversation endpoints
-- Graph pipeline-backed assistant message endpoint
+- LLM-driven agent pipeline-backed assistant message endpoint
 - SSE streaming endpoint for realtime assistant events
+
+## LLM-Driven Agent Architecture
+
+Runtime travel planning pipeline is in:
+
+- `backend/app/services/assistant_service.py`
+- `backend/app/services/agent/`
+
+Pipeline flow:
+
+1. Manage multi-turn context
+2. LLM intent analysis
+3. LLM slot extraction
+4. LLM clarification planning
+5. LLM search task planning
+6. Tool execution (web/place/hotel/weather/transport)
+7. LLM final synthesis and structured response output
+
+No rule-based destination parser or keyword-template itinerary generator is used in the active backend path.
 
 ## Quick start
 

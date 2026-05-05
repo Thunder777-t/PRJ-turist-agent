@@ -40,6 +40,13 @@ export type StreamEvent = {
   data: Record<string, unknown>;
 };
 
+export type TraceLink = {
+  title: string;
+  url: string;
+  platform?: string;
+  snippet?: string;
+};
+
 export type Preference = {
   language: string;
   timezone: string;

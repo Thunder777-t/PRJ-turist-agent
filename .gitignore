@@ -21,10 +21,12 @@ backups/
 # IDE files
 .idea/
 .vscode/
+.playwright-mcp/
 
 # Frontend
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
+*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts

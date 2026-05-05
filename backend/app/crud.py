@@ -151,6 +151,11 @@ def update_conversation(
     return conversation
 
 
+def delete_conversation(db: Session, conversation: models.Conversation) -> None:
+    db.delete(conversation)
+    db.commit()
+
+
 def create_message(
     db: Session,
     user_id: str,

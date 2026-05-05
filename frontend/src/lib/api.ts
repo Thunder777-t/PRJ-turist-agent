@@ -122,12 +122,9 @@ export async function getMe(auth: AuthContext): Promise<User> {
 
 export async function listConversations(
   auth: AuthContext,
-  options?: { includeArchived?: boolean; q?: string },
+  options?: { q?: string },
 ): Promise<Conversation[]> {
   const params = new URLSearchParams({ limit: "100" });
-  if (options?.includeArchived) {
-    params.set("include_archived", "true");
-  }
   if (options?.q?.trim()) {
     params.set("q", options.q.trim());
   }
@@ -161,6 +158,17 @@ export async function patchConversation(
     auth,
   );
   return parseEnvelope<Conversation>(response);
+}
+
+export async function deleteConversation(conversationId: string, auth: AuthContext): Promise<void> {
+  const response = await authorizedFetch(
+    `/conversations/${conversationId}`,
+    {
+      method: "DELETE",
+    },
+    auth,
+  );
+  await parseEnvelope<{ deleted: boolean; conversation_id: string }>(response);
 }
 
 export async function listMessages(conversationId: string, auth: AuthContext): Promise<Message[]> {
@@ -230,13 +238,48 @@ export async function streamMessage(
   content: string,
   auth: AuthContext,
   onEvent: (event: StreamEvent) => void,
+  options?: {
+    signal?: AbortSignal;
+    agentSpeedMode?: "quality" | "fast";
+  },
 ): Promise<void> {
+  const configuredTimeout = Number(import.meta.env.VITE_STREAM_IDLE_TIMEOUT_MS ?? "300000");
+  const STREAM_IDLE_TIMEOUT_MS =
+    Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 300000;
+  const controller = new AbortController();
+  const parentSignal = options?.signal;
+  const onParentAbort = () => {
+    controller.abort("user_stopped");
+  };
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      controller.abort("user_stopped");
+    } else {
+      parentSignal.addEventListener("abort", onParentAbort);
+    }
+  }
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const resetIdleTimer = () => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+    }
+    idleTimer = setTimeout(() => {
+      controller.abort("stream_idle_timeout");
+    }, STREAM_IDLE_TIMEOUT_MS);
+  };
+
+  resetIdleTimer();
+
   const response = await authorizedFetch(
     `/conversations/${conversationId}/stream`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({
+        content,
+        agent_speed_mode: options?.agentSpeedMode,
+      }),
+      signal: controller.signal,
     },
     auth,
     true,
@@ -255,29 +298,51 @@ export async function streamMessage(
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      resetIdleTimer();
+      buffer += decoder.decode(value, { stream: true });
+      let separatorIndex = buffer.indexOf("\n\n");
+      while (separatorIndex >= 0) {
+        const block = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+        const parsed = parseEvent(block);
+        if (parsed) {
+          onEvent(parsed);
+        }
+        separatorIndex = buffer.indexOf("\n\n");
+      }
     }
 
-    buffer += decoder.decode(value, { stream: true });
-    let separatorIndex = buffer.indexOf("\n\n");
-    while (separatorIndex >= 0) {
-      const block = buffer.slice(0, separatorIndex);
-      buffer = buffer.slice(separatorIndex + 2);
-      const parsed = parseEvent(block);
+    if (buffer.trim()) {
+      const parsed = parseEvent(buffer);
       if (parsed) {
         onEvent(parsed);
       }
-      separatorIndex = buffer.indexOf("\n\n");
     }
-  }
-
-  if (buffer.trim()) {
-    const parsed = parseEvent(buffer);
-    if (parsed) {
-      onEvent(parsed);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      const reason = controller.signal.reason;
+      if (reason === "user_stopped") {
+        throw new Error("Streaming stopped by user.");
+      }
+      if (reason === "stream_idle_timeout") {
+        throw new Error("Streaming timed out. Please retry.");
+      }
+      throw new Error("Streaming interrupted. Please retry.");
+    }
+    throw error;
+  } finally {
+    if (parentSignal) {
+      parentSignal.removeEventListener("abort", onParentAbort);
+    }
+    if (idleTimer) {
+      clearTimeout(idleTimer);
     }
   }
 }

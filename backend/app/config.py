@@ -1,6 +1,11 @@
 import os
 from dataclasses import dataclass
 
+from .env_loader import load_project_dotenv
+
+
+load_project_dotenv()
+
 
 def _parse_bool(value: str | None, default: bool) -> bool:
     if value is None:
